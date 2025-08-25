@@ -10,10 +10,11 @@ from collections import defaultdict
 import argparse
 
 class SafeTakeoutReconstructor:
-    def __init__(self, source_dir, dest_dir, dry_run=True):
+    def __init__(self, source_dir, dest_dir, dry_run=True, progress_callback=None):
         self.source_dir = Path(source_dir)
         self.dest_dir = Path(dest_dir)
         self.dry_run = dry_run
+        self.progress_callback = progress_callback  # GUI progress updates
         
         # Logging setup
         self.log_dir = self.dest_dir.parent / "takeout_logs"
@@ -40,11 +41,28 @@ class SafeTakeoutReconstructor:
         self.file_hashes = {}  # hash -> list of file paths
         self.processed_files = set()
         
+        # GUI state tracking
+        self.current_operation = "idle"
+        self.current_file = ""
+        self.progress_percent = 0
+        
     def log(self, message, file=None):
         """Thread-safe logging with timestamp"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_message = f"[{timestamp}] {message}"
         print(log_message)
+        
+        # Send to GUI if callback is available
+        if self.progress_callback:
+            self.progress_callback({
+                'type': 'log',
+                'message': message,
+                'timestamp': timestamp,
+                'stats': self.stats.copy(),
+                'current_operation': self.current_operation,
+                'current_file': self.current_file,
+                'progress_percent': self.progress_percent
+            })
         
         if file is None:
             file = self.log_file
@@ -368,7 +386,11 @@ class SafeTakeoutReconstructor:
                     processed += 1
                     if processed % 100 == 0:
                         pct = (processed / total_files) * 100
+                        self.progress_percent = pct
                         self.log(f"Progress: {processed}/{total_files} ({pct:.1f}%)")
+                    
+                    # Update current file for GUI
+                    self.current_file = str(src_file.name)
                     
                     # Process the file
                     self.process_file(src_file, rel_path)
