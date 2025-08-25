@@ -1,0 +1,17 @@
+name: gdrive-consolidator
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11  # Latest stable version with good performance
+  - pip
+  - ipython  # For interactive testing
+  - pip:
+    - tqdm>=4.65.0  # Progress bars for better tracking
+    - colorama>=0.4.6  # Colored terminal output
+    - rich>=13.0.0  # Rich terminal formatting
+    - psutil>=5.9.0  # System resource monitoring
+    - pytest>=7.4.0  # For testing scripts
+    - pyyaml>=6.0  # YAML support
+
+
