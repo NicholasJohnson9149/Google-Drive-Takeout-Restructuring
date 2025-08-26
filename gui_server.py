@@ -549,6 +549,268 @@ async def health_check():
                                  if op.get('status') in ['processing', 'consolidating', 'extracting', 'started']])
     })
 
+@app.get("/user-paths")
+async def get_user_paths():
+    """Get platform-appropriate default paths for the current user"""
+    import platform
+    import os
+    
+    system = platform.system().lower()
+    username = os.getlogin() if hasattr(os, 'getlogin') else os.environ.get('USER', os.environ.get('USERNAME', 'user'))
+    
+    if system == 'darwin':  # macOS
+        home = Path.home()
+        paths = {
+            'platform': 'macOS',
+            'username': username,
+            'home': str(home),
+            'desktop': str(home / 'Desktop'),
+            'documents': str(home / 'Documents'),
+            'downloads': str(home / 'Downloads'),
+            'defaultSource': str(home / 'Downloads' / 'Takeout'),
+            'defaultOutput': str(home / 'Desktop' / 'Drive Export')
+        }
+    elif system == 'windows':
+        home = Path.home()
+        paths = {
+            'platform': 'Windows',
+            'username': username,
+            'home': str(home),
+            'desktop': str(home / 'Desktop'),
+            'documents': str(home / 'Documents'),
+            'downloads': str(home / 'Downloads'),
+            'defaultSource': str(home / 'Downloads' / 'Takeout'),
+            'defaultOutput': str(home / 'Desktop' / 'Drive Export')
+        }
+    else:  # Linux and others
+        home = Path.home()
+        paths = {
+            'platform': 'Linux',
+            'username': username,
+            'home': str(home),
+            'desktop': str(home / 'Desktop'),
+            'documents': str(home / 'Documents'),
+            'downloads': str(home / 'Downloads'),
+            'defaultSource': str(home / 'Downloads' / 'Takeout'),
+            'defaultOutput': str(home / 'Desktop' / 'Drive Export')
+        }
+    
+    return JSONResponse(paths)
+
+@app.post("/complete-path")
+async def complete_path(request: Request):
+    """Try to complete a partial path using server-side file system access"""
+    try:
+        data = await request.json()
+        partial_path = data.get('partialPath', '')
+        
+        if not partial_path:
+            return JSONResponse({
+                'success': False,
+                'error': 'No partial path provided'
+            })
+        
+        # Try different completion strategies
+        completed_paths = []
+        
+        # Strategy 1: Check user's common directories
+        user_dirs = [
+            Path.home() / 'Desktop',
+            Path.home() / 'Downloads', 
+            Path.home() / 'Documents'
+        ]
+        
+        for base_dir in user_dirs:
+            if base_dir.exists():
+                potential_path = base_dir / partial_path
+                if potential_path.exists():
+                    completed_paths.append({
+                        'path': str(potential_path),
+                        'confidence': 0.9,
+                        'method': 'user-directory-match'
+                    })
+        
+        # Strategy 2: Search mounted volumes (safe locations only)
+        volumes_path = Path('/Volumes') if os.name == 'posix' else None
+        if volumes_path and volumes_path.exists():
+            try:
+                for volume in volumes_path.iterdir():
+                    if volume.is_dir() and not volume.name.startswith('.'):
+                        potential_path = volume / partial_path
+                        if potential_path.exists():
+                            completed_paths.append({
+                                'path': str(potential_path),
+                                'confidence': 0.8,
+                                'method': 'volume-match'
+                            })
+            except (PermissionError, OSError):
+                pass  # Skip inaccessible volumes
+        
+        # Strategy 3: Try relative to current working directory
+        cwd_path = Path.cwd() / partial_path
+        if cwd_path.exists():
+            completed_paths.append({
+                'path': str(cwd_path),
+                'confidence': 0.7,
+                'method': 'cwd-relative'
+            })
+        
+        if completed_paths:
+            # Return the highest confidence match
+            best_match = max(completed_paths, key=lambda x: x['confidence'])
+            return JSONResponse({
+                'success': True,
+                'completedPath': best_match['path'],
+                'confidence': best_match['confidence'],
+                'method': best_match['method'],
+                'allMatches': completed_paths
+            })
+        else:
+            return JSONResponse({
+                'success': False,
+                'error': 'Could not find any matching paths',
+                'partialPath': partial_path
+            })
+            
+    except Exception as e:
+        return JSONResponse({
+            'success': False,
+            'error': f'Path completion failed: {str(e)}'
+        })
+
+@app.post("/resolve-directory-path")
+async def resolve_directory_path(request: Request):
+    """Resolve a directory path based on name and contents analysis"""
+    try:
+        data = await request.json()
+        dir_name = data.get('directoryName', '')
+        has_zip_files = data.get('hasZipFiles', False)
+        zip_files = data.get('zipFiles', [])
+        directories = data.get('directories', [])
+        has_takeout_structure = data.get('hasTakeoutStructure', False)
+        
+        if not dir_name:
+            return JSONResponse({
+                'success': False,
+                'error': 'No directory name provided'
+            })
+        
+        resolved_paths = []
+        
+        # Search strategy: Look for directories with matching name and content signature
+        search_locations = [
+            Path.home() / 'Desktop',
+            Path.home() / 'Downloads',
+            Path.home() / 'Documents'
+        ]
+        
+        # Add mounted volumes for macOS/Linux
+        if os.name == 'posix':
+            volumes_path = Path('/Volumes')
+            if volumes_path.exists():
+                try:
+                    for volume in volumes_path.iterdir():
+                        if volume.is_dir() and not volume.name.startswith('.'):
+                            search_locations.append(volume)
+                except (PermissionError, OSError):
+                    pass
+        
+        for base_location in search_locations:
+            if not base_location.exists():
+                continue
+                
+            try:
+                # Look for exact directory name match
+                candidate_path = base_location / dir_name
+                if candidate_path.exists() and candidate_path.is_dir():
+                    # Verify contents match what we expect
+                    confidence = calculate_directory_match_confidence(
+                        candidate_path, has_zip_files, zip_files, has_takeout_structure
+                    )
+                    
+                    if confidence > 0.5:  # Only suggest if reasonably confident
+                        resolved_paths.append({
+                            'path': str(candidate_path),
+                            'confidence': confidence,
+                            'location': str(base_location)
+                        })
+                
+                # Also search subdirectories one level deep
+                try:
+                    for subdir in base_location.iterdir():
+                        if subdir.is_dir() and subdir.name == dir_name:
+                            confidence = calculate_directory_match_confidence(
+                                subdir, has_zip_files, zip_files, has_takeout_structure
+                            )
+                            if confidence > 0.5:
+                                resolved_paths.append({
+                                    'path': str(subdir),
+                                    'confidence': confidence,
+                                    'location': str(base_location)
+                                })
+                except (PermissionError, OSError):
+                    continue
+                    
+            except (PermissionError, OSError):
+                continue
+        
+        if resolved_paths:
+            # Return the highest confidence match
+            best_match = max(resolved_paths, key=lambda x: x['confidence'])
+            return JSONResponse({
+                'success': True,
+                'resolvedPath': best_match['path'],
+                'confidence': best_match['confidence'],
+                'searchLocation': best_match['location'],
+                'allMatches': resolved_paths
+            })
+        else:
+            return JSONResponse({
+                'success': False,
+                'error': 'Could not find matching directory',
+                'searchedLocations': [str(loc) for loc in search_locations]
+            })
+            
+    except Exception as e:
+        return JSONResponse({
+            'success': False,
+            'error': f'Directory resolution failed: {str(e)}'
+        })
+
+def calculate_directory_match_confidence(dir_path, expected_has_zips, expected_zip_files, expected_takeout_structure):
+    """Calculate confidence that this directory matches the expected structure"""
+    try:
+        confidence = 0.5  # Base confidence for name match
+        
+        # Check for ZIP files
+        zip_files_found = []
+        takeout_structure_found = False
+        
+        for item in dir_path.iterdir():
+            if item.is_file() and item.name.lower().endswith('.zip'):
+                zip_files_found.append(item.name)
+                if 'takeout' in item.name.lower():
+                    takeout_structure_found = True
+            elif item.is_dir() and 'takeout' in item.name.lower():
+                takeout_structure_found = True
+        
+        # Boost confidence based on content matches
+        if expected_has_zips and zip_files_found:
+            confidence += 0.2
+            
+            # Check for specific ZIP file matches
+            matches = set(expected_zip_files) & set(zip_files_found)
+            if matches:
+                confidence += 0.2 * (len(matches) / len(expected_zip_files))
+        
+        if expected_takeout_structure and takeout_structure_found:
+            confidence += 0.1
+        
+        return min(confidence, 1.0)  # Cap at 1.0
+        
+    except (PermissionError, OSError):
+        return 0.3  # Low confidence if we can't read the directory
+
 @app.get("/recovery-info")
 async def get_recovery_info():
     """Get information about recoverable operations and last settings"""
