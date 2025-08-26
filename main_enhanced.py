@@ -10,11 +10,12 @@ from collections import defaultdict
 import argparse
 
 class SafeTakeoutReconstructor:
-    def __init__(self, source_dir, dest_dir, dry_run=True, progress_callback=None):
+    def __init__(self, source_dir, dest_dir, dry_run=True, progress_callback=None, gui_mode=False):
         self.source_dir = Path(source_dir)
         self.dest_dir = Path(dest_dir)
         self.dry_run = dry_run
         self.progress_callback = progress_callback  # GUI progress updates
+        self.gui_mode = gui_mode  # When True, sends prompts to GUI instead of terminal
         
         # Logging setup
         self.log_dir = self.dest_dir.parent / "takeout_logs"
@@ -45,6 +46,7 @@ class SafeTakeoutReconstructor:
         self.current_operation = "idle"
         self.current_file = ""
         self.progress_percent = 0
+        self.pending_prompt = None  # For GUI prompts
         
     def log(self, message, file=None):
         """Thread-safe logging with timestamp"""
@@ -69,6 +71,39 @@ class SafeTakeoutReconstructor:
         
         with open(file, "a", encoding='utf-8') as f:
             f.write(log_message + "\n")
+    
+    def prompt_user(self, message, prompt_type="confirm", expected_responses=None):
+        """Handle user prompts for both terminal and GUI"""
+        if self.gui_mode:
+            # Send prompt to GUI and wait for response
+            self.pending_prompt = {
+                'message': message,
+                'type': prompt_type,
+                'expected': expected_responses or ['y', 'n']
+            }
+            
+            if self.progress_callback:
+                self.progress_callback({
+                    'type': 'prompt',
+                    'message': message,
+                    'prompt_type': prompt_type,
+                    'expected_responses': expected_responses or ['y', 'n']
+                })
+            
+            # In GUI mode, this should be handled by the GUI server
+            # Return a default for now - GUI will override this
+            return 'y'  
+        else:
+            # Terminal mode - use input() as before
+            if prompt_type == "space_warning":
+                response = input(f"{message}. Continue? (y/n): ")
+                return response.lower()
+            elif prompt_type == "copy_confirm":
+                response = input(f"{message} (yes/no): ")
+                return response.lower()
+            else:
+                response = input(f"{message}: ")
+                return response.lower()
     
     def calculate_file_hash(self, filepath, chunk_size=8192):
         """Calculate SHA256 hash of a file"""
@@ -153,17 +188,50 @@ class SafeTakeoutReconstructor:
             self.log(f"Available disk space: {free_gb:.2f} GB")
             
             if free_gb < 50:  # Warning if less than 50GB free
-                response = input(f"⚠️  WARNING: Only {free_gb:.2f} GB free. Continue? (y/n): ")
-                if response.lower() != 'y':
-                    sys.exit("Aborted by user")
+                warning_msg = f"⚠️  WARNING: Only {free_gb:.2f} GB free"
+                self.log(warning_msg)
+                
+                if self.gui_mode:
+                    # In GUI mode, space check should have been done upfront
+                    # Log the warning but continue (user already confirmed in GUI)
+                    self.log("GUI mode: continuing with user pre-approval")
+                else:
+                    # Terminal mode: prompt user
+                    response = input(f"{warning_msg}. Continue? (y/n): ")
+                    if response.lower() != 'y':
+                        sys.exit("Aborted by user")
         except:
             self.log("Could not check disk space", self.error_log)
         
-        # Scan for takeout folders
-        self.takeout_folders = list(self.source_dir.glob("Takeout*/Drive"))
+        # Scan for takeout folders (handle multiple nested structures)
+        self.takeout_folders = []
+        
+        # Pattern 1: Direct Takeout/Drive structure
+        direct_takeouts = list(self.source_dir.glob("Takeout*/Drive"))
+        self.takeout_folders.extend(direct_takeouts)
+        
+        # Pattern 2: Nested structure from ZIP extraction (takeout-*/Takeout/Drive)
+        nested_takeouts = list(self.source_dir.glob("*/Takeout/Drive"))
+        self.takeout_folders.extend(nested_takeouts)
+        
+        # Pattern 3: Double nested structure (takeout-*/Takeout*)
+        double_nested = list(self.source_dir.glob("*/Takeout*"))
+        self.takeout_folders.extend(double_nested)
+        
+        # Pattern 4: Fallback - any Takeout folder at any level
         if not self.takeout_folders:
-            # Also try without /Drive suffix
-            self.takeout_folders = list(self.source_dir.glob("Takeout*"))
+            fallback_takeouts = list(self.source_dir.glob("**/Takeout*"))
+            # Filter to only include directories
+            self.takeout_folders = [f for f in fallback_takeouts if f.is_dir()]
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_takeouts = []
+        for folder in self.takeout_folders:
+            if folder not in seen:
+                seen.add(folder)
+                unique_takeouts.append(folder)
+        self.takeout_folders = unique_takeouts
         
         self.log(f"Found {len(self.takeout_folders)} Takeout folders")
         for folder in self.takeout_folders:
@@ -351,9 +419,14 @@ class SafeTakeoutReconstructor:
             self.log(f"Verification: {'ENABLED' if verify_copies else 'DISABLED'}")
             self.log("=" * 60)
             
-            response = input("\n⚠️  This will copy files. Continue? (yes/no): ")
-            if response.lower() != 'yes':
-                sys.exit("Aborted by user")
+            if self.gui_mode:
+                # In GUI mode, user already confirmed by clicking "Start Restructuring"
+                self.log("\n✅ GUI mode: proceeding with user pre-approval")
+            else:
+                # Terminal mode: prompt user
+                response = input("\n⚠️  This will copy files. Continue? (yes/no): ")
+                if response.lower() != 'yes':
+                    sys.exit("Aborted by user")
         
         # Process files
         self.log("\n" + "=" * 60)
