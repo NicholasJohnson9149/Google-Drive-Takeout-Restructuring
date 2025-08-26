@@ -9,6 +9,7 @@ from datetime import datetime
 from collections import defaultdict
 import argparse
 
+# cSpell:ignore Reconstructor fsrc fdst reconstructor
 class SafeTakeoutReconstructor:
     def __init__(self, source_dir, dest_dir, dry_run=True, progress_callback=None, gui_mode=False):
         self.source_dir = Path(source_dir)
@@ -47,6 +48,9 @@ class SafeTakeoutReconstructor:
         self.current_file = ""
         self.progress_percent = 0
         self.pending_prompt = None  # For GUI prompts
+        self.cancelled = False  # Cancellation flag
+        self.temp_files = set()  # Track temporary files for cleanup
+        self.open_file_handles = set()  # Track open file handles
         
     def log(self, message, file=None):
         """Thread-safe logging with timestamp"""
@@ -279,18 +283,24 @@ class SafeTakeoutReconstructor:
         return total_files, total_size
     
     def handle_google_metadata(self, src_file):
-        """Extract original filename from Google Takeout metadata"""
+        """Extract original filename from Google Takeout metadata with proper resource management"""
         # Google Takeout may append numbers or have companion .json files
         json_file = Path(str(src_file) + ".json")
         if json_file.exists():
             try:
-                with open(json_file, 'r') as f:
+                with open(json_file, 'r', encoding='utf-8') as f:
                     metadata = json.load(f)
                     # Google metadata might have original title
                     if 'title' in metadata:
-                        return metadata['title']
-            except:
-                pass
+                        title = metadata['title']
+                        # Ensure title is safe for filesystem
+                        import re
+                        safe_title = re.sub(r'[<>:"/\\|?*]', '_', title)
+                        return safe_title
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
+                self.log(f"Warning: Could not read metadata for {src_file}: {e}")
+            except Exception as e:
+                self.log(f"Unexpected error reading metadata for {src_file}: {e}")
         
         # Handle numbered exports (file(1).ext, file(2).ext, etc.)
         filename = src_file.name
@@ -303,33 +313,100 @@ class SafeTakeoutReconstructor:
         return filename
     
     def safe_copy_file(self, src_file, dst_file):
-        """Copy file with verification"""
+        """Copy file with verification and proper resource management"""
         try:
-            # Create parent directory if needed
-            dst_file.parent.mkdir(parents=True, exist_ok=True)
+            # Validate source file
+            if not src_file.exists():
+                raise FileNotFoundError(f"Source file does not exist: {src_file}")
             
-            # Copy with metadata preservation
-            shutil.copy2(src_file, dst_file)
+            if not src_file.is_file():
+                raise ValueError(f"Source is not a file: {src_file}")
             
-            # Verify copy
+            # Create parent directory if needed with proper permissions
+            dst_file.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+            
+            # Check if destination already exists and handle appropriately
+            if dst_file.exists():
+                if dst_file.samefile(src_file):
+                    # Same file, no need to copy
+                    return True
+            
+            # Copy with metadata preservation using chunks for large files
             if not self.dry_run:
-                if src_file.stat().st_size != dst_file.stat().st_size:
-                    raise ValueError(f"Size mismatch after copy!")
+                # For files larger than 100MB, use chunked copy to prevent memory issues
+                file_size = src_file.stat().st_size
+                if file_size > 100 * 1024 * 1024:  # 100MB
+                    self._chunked_copy(src_file, dst_file)
+                else:
+                    shutil.copy2(src_file, dst_file)
+                
+                # Verify copy immediately
+                dst_stat = dst_file.stat()
+                src_stat = src_file.stat()
+                
+                if src_stat.st_size != dst_stat.st_size:
+                    # Clean up failed copy
+                    try:
+                        dst_file.unlink()
+                    except:
+                        pass
+                    raise ValueError(f"Size mismatch after copy! Expected {src_stat.st_size}, got {dst_stat.st_size}")
                 
                 # For critical mode, also verify hash
-                if self.verify_copies:
-                    src_hash = self.calculate_file_hash(src_file)
-                    dst_hash = self.calculate_file_hash(dst_file)
-                    if src_hash != dst_hash:
-                        dst_file.unlink()  # Remove bad copy
-                        raise ValueError(f"Hash mismatch after copy!")
+                if hasattr(self, 'verify_copies') and self.verify_copies:
+                    try:
+                        src_hash = self.calculate_file_hash(src_file)
+                        dst_hash = self.calculate_file_hash(dst_file)
+                        if src_hash != dst_hash:
+                            # Clean up failed copy
+                            try:
+                                dst_file.unlink()
+                            except:
+                                pass
+                            raise ValueError(f"Hash mismatch after copy! File may be corrupted.")
+                    except Exception as hash_error:
+                        # If hash verification fails, remove the copy to be safe
+                        try:
+                            dst_file.unlink()
+                        except:
+                            pass
+                        raise ValueError(f"Hash verification failed: {hash_error}")
             
             return True
             
+        except (OSError, IOError) as e:
+            self.log(f"ERROR: I/O error copying {src_file}: {e}", self.error_log)
+            self.stats['errors'] += 1
+            return False
         except Exception as e:
             self.log(f"ERROR copying {src_file}: {e}", self.error_log)
             self.stats['errors'] += 1
             return False
+    
+    def _chunked_copy(self, src_file, dst_file):
+        """Copy large files in chunks to prevent memory issues"""
+        chunk_size = 64 * 1024  # 64KB chunks
+        
+        try:
+            with open(src_file, 'rb') as fsrc:
+                with open(dst_file, 'wb') as fdst:
+                    while True:
+                        chunk = fsrc.read(chunk_size)
+                        if not chunk:
+                            break
+                        fdst.write(chunk)
+                        
+            # Copy metadata separately
+            shutil.copystat(src_file, dst_file)
+            
+        except Exception as e:
+            # Clean up partial file on error
+            try:
+                if dst_file.exists():
+                    dst_file.unlink()
+            except:
+                pass
+            raise e
     
     def process_file(self, src_file, rel_path):
         """Process a single file with deduplication"""
@@ -435,9 +512,16 @@ class SafeTakeoutReconstructor:
         
         processed = 0
         for takeout_drive in self.takeout_folders:
+            if self.cancelled:
+                self.log("⚠️ Operation cancelled during processing")
+                return
+                
             self.log(f"\nProcessing: {takeout_drive}")
             
             for root, dirs, files in os.walk(takeout_drive):
+                if self.cancelled:
+                    self.log("⚠️ Operation cancelled during file processing")
+                    return
                 # Skip metadata directories
                 if '.metadata' in root:
                     continue
@@ -449,6 +533,10 @@ class SafeTakeoutReconstructor:
                     rel_path = Path()
                 
                 for file in files:
+                    if self.cancelled:
+                        self.log("⚠️ Operation cancelled during file iteration")
+                        return
+                        
                     # Skip JSON metadata files
                     if file.endswith('.json') and not file.startswith('.'):
                         continue
@@ -487,6 +575,58 @@ class SafeTakeoutReconstructor:
         
         if self.stats['errors'] > 0:
             self.log(f"⚠️  Check error log: {self.error_log}")
+    
+    def cancel(self):
+        """Cancel the current operation and clean up resources"""
+        self.cancelled = True
+        self.log("🛑 Operation cancelled by user")
+        self.cleanup_resources()
+    
+    def cleanup_resources(self):
+        """Clean up all open resources and temporary files"""
+        try:
+            # Close any open file handles
+            for handle in list(self.open_file_handles):
+                try:
+                    if hasattr(handle, 'close') and not handle.closed:
+                        handle.close()
+                except:
+                    pass
+            self.open_file_handles.clear()
+            
+            # Clean up temporary files
+            for temp_file in list(self.temp_files):
+                try:
+                    temp_path = Path(temp_file)
+                    if temp_path.exists():
+                        if temp_path.is_file():
+                            temp_path.unlink()
+                        elif temp_path.is_dir():
+                            import shutil
+                            shutil.rmtree(temp_path, ignore_errors=True)
+                except Exception as e:
+                    self.log(f"Warning: Could not cleanup temp file {temp_file}: {e}")
+            self.temp_files.clear()
+            
+            self.log("🧹 Resource cleanup completed")
+            
+        except Exception as e:
+            self.log(f"Warning: Error during resource cleanup: {e}")
+    
+    def __del__(self):
+        """Destructor to ensure cleanup on object deletion"""
+        try:
+            self.cleanup_resources()
+        except:
+            pass
+        
+        # Update GUI state if callback exists
+        if self.progress_callback:
+            self.progress_callback({
+                'status': 'cancelled',
+                'message': 'Operation cancelled by user',
+                'progress_percent': 0
+            })
 
 def main():
     parser = argparse.ArgumentParser(description='Safely reconstruct Google Drive from Takeout')

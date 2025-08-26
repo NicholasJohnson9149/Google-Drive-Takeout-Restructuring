@@ -25,50 +25,124 @@ import uvicorn
 from main_enhanced import SafeTakeoutReconstructor
 
 def move_to_trash(file_path: Path, callback=None):
-    """Move file or directory to trash (cross-platform)"""
+    """SAFE move file or directory to trash with proper error handling"""
+    if not file_path.exists():
+        if callback:
+            callback({'type': 'log', 'message': f'⚠️ Path does not exist: {file_path}'})
+        return False
+        
     try:
         import platform
         import subprocess
+        import time
         
         system = platform.system().lower()
-        path_str = str(file_path)
+        path_str = str(file_path.resolve())  # Use absolute path
         
-        if system == 'darwin':  # macOS
-            subprocess.run(['mv', path_str, os.path.expanduser('~/.Trash/')], check=True)
-        elif system == 'windows':
-            # Use PowerShell to move to recycle bin
-            subprocess.run([
-                'powershell', '-Command', 
-                f'Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory("{path_str}", [Microsoft.VisualBasic.FileIO.DeleteDirectoryOption]::DeleteAllContents, [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin)'
-            ], check=True)
-        elif system == 'linux':
-            # Try trash-cli first, fallback to rm if not available
-            try:
-                subprocess.run(['trash', path_str], check=True)
-            except FileNotFoundError:
-                # trash-cli not installed, use rm as fallback
-                subprocess.run(['rm', '-rf', path_str], check=True)
-        else:
-            # Fallback to shutil.rmtree for unknown systems
-            shutil.rmtree(file_path)
-            
-        if callback:
-            callback({'type': 'log', 'message': f'🗑️ Moved to trash: {file_path.name}'})
-        return True
-        
-    except subprocess.CalledProcessError as e:
-        if callback:
-            callback({'type': 'log', 'message': f'⚠️ Failed to move to trash: {e}'})
-        # Fallback to regular deletion
-        try:
-            shutil.rmtree(file_path)
+        # Ensure we're not trying to delete system directories
+        forbidden_paths = {'/System', '/Library', '/usr', '/bin', '/sbin', '/Applications'}
+        if any(path_str.startswith(forbidden) for forbidden in forbidden_paths):
             if callback:
-                callback({'type': 'log', 'message': f'🧽 Deleted (fallback): {file_path.name}'})
-            return True
-        except Exception as fallback_error:
-            if callback:
-                callback({'type': 'log', 'message': f'⚠️ Could not delete: {fallback_error}'})
+                callback({'type': 'log', 'message': f'🚫 Refusing to delete system path: {path_str}'})
             return False
+        
+        if system == 'darwin':  # macOS - SAFER VERSION
+            # Use osascript for safer trash operations on macOS
+            try:
+                # Quote the path properly to handle spaces and special characters
+                escaped_path = path_str.replace("'", "'\"'\"'")
+                applescript = f"tell application \"Finder\" to delete POSIX file '{escaped_path}'"
+                
+                result = subprocess.run([
+                    'osascript', '-e', applescript
+                ], capture_output=True, text=True, timeout=30)
+                
+                if result.returncode == 0:
+                    if callback:
+                        callback({'type': 'log', 'message': f'🗑️ Moved to trash: {file_path.name}'})
+                    return True
+                else:
+                    raise subprocess.CalledProcessError(result.returncode, 'osascript')
+                    
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                # Fallback to mv if AppleScript fails
+                try:
+                    trash_path = Path.home() / ".Trash" / file_path.name
+                    counter = 1
+                    while trash_path.exists():
+                        name = file_path.stem + f"_{counter}" + file_path.suffix
+                        trash_path = Path.home() / ".Trash" / name
+                        counter += 1
+                    
+                    shutil.move(str(file_path), str(trash_path))
+                    if callback:
+                        callback({'type': 'log', 'message': f'🗑️ Moved to trash (fallback): {file_path.name}'})
+                    return True
+                except Exception as mv_error:
+                    raise mv_error
+                    
+        elif system == 'windows':
+            # Windows - use safer method
+            try:
+                import send2trash
+                send2trash.send2trash(str(file_path))
+                if callback:
+                    callback({'type': 'log', 'message': f'🗑️ Moved to recycle bin: {file_path.name}'})
+                return True
+            except ImportError:
+                # Fallback to PowerShell if send2trash not available
+                subprocess.run([
+                    'powershell', '-Command', 
+                    f'Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory("{path_str}", [Microsoft.VisualBasic.FileIO.DeleteDirectoryOption]::DeleteAllContents, [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin)'
+                ], check=True, timeout=30)
+                if callback:
+                    callback({'type': 'log', 'message': f'🗑️ Moved to recycle bin: {file_path.name}'})
+                return True
+                
+        elif system == 'linux':
+            # Linux - safer trash handling
+            try:
+                subprocess.run(['trash-put', path_str], check=True, timeout=30)
+                if callback:
+                    callback({'type': 'log', 'message': f'🗑️ Moved to trash: {file_path.name}'})
+                return True
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                # Create safe trash directory in user home
+                trash_dir = Path.home() / ".local/share/Trash/files"
+                trash_dir.mkdir(parents=True, exist_ok=True)
+                
+                trash_path = trash_dir / file_path.name
+                counter = 1
+                while trash_path.exists():
+                    name = file_path.stem + f"_{counter}" + file_path.suffix
+                    trash_path = trash_dir / name
+                    counter += 1
+                
+                shutil.move(str(file_path), str(trash_path))
+                if callback:
+                    callback({'type': 'log', 'message': f'🗑️ Moved to trash: {file_path.name}'})
+                return True
+        else:
+            # Unknown system - safe removal to user trash
+            user_trash = Path.home() / ".trash"
+            user_trash.mkdir(exist_ok=True)
+            
+            trash_path = user_trash / file_path.name
+            counter = 1
+            while trash_path.exists():
+                name = file_path.stem + f"_{counter}" + file_path.suffix
+                trash_path = user_trash / name
+                counter += 1
+            
+            shutil.move(str(file_path), str(trash_path))
+            if callback:
+                callback({'type': 'log', 'message': f'🗑️ Moved to trash: {file_path.name}'})
+            return True
+            
+    except subprocess.TimeoutExpired:
+        if callback:
+            callback({'type': 'log', 'message': f'⚠️ Trash operation timed out for: {file_path.name}'})
+        return False
     except Exception as e:
         if callback:
             callback({'type': 'log', 'message': f'⚠️ Trash operation failed: {e}'})
@@ -96,21 +170,30 @@ def cleanup_old_temp_dirs(base_path: Path, callback=None):
 # Initialize FastAPI app
 app = FastAPI(title="Google Drive Takeout Consolidator", version="1.0.0")
 
-# Startup cleanup
-@app.on_event("startup")
+# Startup cleanup - SAFE VERSION
+@app.on_event("startup") 
 async def startup_cleanup():
-    """Clean up any leftover temp files from previous runs"""
+    """Clean up any leftover temp files from previous runs - SAFE VERSION"""
     try:
-        # Check common locations for temp files
-        volumes_path = Path('/Volumes')
-        if volumes_path.exists():
-            for volume in volumes_path.iterdir():
-                if volume.is_dir():
-                    cleanup_old_temp_dirs(volume, None)
+        # ONLY check common safe locations, NOT all volumes
+        safe_locations = [
+            Path.home() / "Desktop",
+            Path.home() / "Downloads", 
+            Path("/tmp"),
+            Path(os.getcwd())  # Current working directory only
+        ]
+        
+        for location in safe_locations:
+            if location.exists() and location.is_dir():
+                try:
+                    cleanup_old_temp_dirs(location, None)
+                except Exception as e:
+                    print(f"Safe cleanup warning for {location}: {e}")
+                    
     except Exception as e:
         print(f"Startup cleanup warning: {e}")
         
-    print("🧹 Startup cleanup completed")
+    print("🧹 Safe startup cleanup completed")
 
 # Mount static files and templates
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -125,6 +208,8 @@ class GUIState:
         
     def create_operation(self, operation_id: str, operation_type: str) -> None:
         """Create a new operation tracking entry"""
+        self.ensure_attributes()
+        
         self.active_operations[operation_id] = {
             'id': operation_id,
             'type': operation_type,
@@ -132,18 +217,25 @@ class GUIState:
             'progress': 0,
             'current_file': '',
             'start_time': datetime.now().isoformat(),
-            'stats': {}
+            'stats': {},
+            'last_save': datetime.now().isoformat()
         }
+        self.last_operation_id = operation_id
+        self.save_state()
         self.progress_logs[operation_id] = []
     
     def update_operation(self, operation_id: str, update_data: Dict) -> None:
         """Update operation progress"""
         if operation_id in self.active_operations:
+            # Update last activity timestamp for hang detection
+            now = datetime.now()
+            update_data['last_activity'] = now.isoformat()
+            
             self.active_operations[operation_id].update(update_data)
             
             # Add to progress log
             log_entry = {
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': now.isoformat(),
                 'message': update_data.get('message', ''),
                 'progress': update_data.get('progress_percent', 0),
                 'current_file': update_data.get('current_file', '')
@@ -153,8 +245,222 @@ class GUIState:
             # Keep only last 100 log entries
             if len(self.progress_logs[operation_id]) > 100:
                 self.progress_logs[operation_id] = self.progress_logs[operation_id][-100:]
+                
+            # Save state periodically (every 10 seconds) or on important updates
+            last_save_str = self.active_operations[operation_id].get('last_save', now.isoformat())
+            last_save = datetime.fromisoformat(last_save_str)
+            
+            # Save if it's been 10+ seconds or if it's a status change
+            should_save = (
+                (now - last_save).total_seconds() > 10 or
+                'status' in update_data or
+                update_data.get('progress_percent', 0) % 5 == 0  # Every 5% progress
+            )
+            
+            if should_save:
+                self.active_operations[operation_id]['last_save'] = now.isoformat()
+                self.save_state()
+    
+    def check_for_hung_operations(self, timeout_minutes: int = 10) -> List[str]:
+        """Check for operations that haven't updated in specified timeout period"""
+        hung_operations = []
+        now = datetime.now()
+        
+        for op_id, operation in self.active_operations.items():
+            # Skip completed/failed operations
+            if operation.get('status') in ['completed', 'failed', 'cancelled']:
+                continue
+                
+            # Check last activity timestamp
+            last_activity_str = operation.get('last_activity', operation.get('start_time'))
+            if last_activity_str:
+                try:
+                    last_activity = datetime.fromisoformat(last_activity_str)
+                    minutes_since_activity = (now - last_activity).total_seconds() / 60
+                    
+                    if minutes_since_activity > timeout_minutes:
+                        hung_operations.append(op_id)
+                        print(f"⚠️ Operation {op_id} appears hung - no activity for {minutes_since_activity:.1f} minutes")
+                except (ValueError, TypeError):
+                    # If we can't parse the timestamp, consider it potentially hung
+                    hung_operations.append(op_id)
+                    
+        return hung_operations
+    
+    def mark_operation_as_hung(self, operation_id: str) -> None:
+        """Mark an operation as potentially hung"""
+        if operation_id in self.active_operations:
+            self.active_operations[operation_id].update({
+                'status': 'hung',
+                'message': 'Operation appears to have hung - no progress updates received',
+                'hung_detected_at': datetime.now().isoformat()
+            })
+    
+    def save_state(self):
+        """Save current state to disk for persistence across restarts"""
+        try:
+            # Ensure attributes exist (for existing instances)
+            if not hasattr(self, 'last_operation_id'):
+                self.last_operation_id = None
+            if not hasattr(self, 'last_settings'):
+                self.last_settings = {}
+            if not hasattr(self, 'session_data'):
+                self.session_data = {}
+                
+            state_data = {
+                'active_operations': self.active_operations,
+                'progress_logs': self.progress_logs,
+                'last_operation_id': self.last_operation_id,
+                'last_settings': self.last_settings,
+                'session_data': self.session_data,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            import pickle
+            with open(self.state_file, 'wb') as f:
+                pickle.dump(state_data, f)
+                
+        except Exception as e:
+            print(f"Warning: Could not save state: {e}")
+    
+    def load_state(self):
+        """Load persistent state from disk"""
+        # Ensure attributes exist first
+        if not hasattr(self, 'last_operation_id'):
+            self.last_operation_id = None
+        if not hasattr(self, 'last_settings'):
+            self.last_settings = {}
+        if not hasattr(self, 'session_data'):
+            self.session_data = {}
+            
+        try:
+            if self.state_file.exists():
+                import pickle
+                with open(self.state_file, 'rb') as f:
+                    state_data = pickle.load(f)
+                
+                self.active_operations = state_data.get('active_operations', {})
+                self.progress_logs = state_data.get('progress_logs', {})
+                self.last_operation_id = state_data.get('last_operation_id')
+                self.last_settings = state_data.get('last_settings', {})
+                self.session_data = state_data.get('session_data', {})
+                
+                # Check if we have a recent active operation (within last 24 hours)
+                recent_active = None
+                for op_id, op_data in self.active_operations.items():
+                    if op_data.get('status') in ['processing', 'consolidating', 'extracting']:
+                        start_time = datetime.fromisoformat(op_data.get('start_time', datetime.now().isoformat()))
+                        if (datetime.now() - start_time).total_seconds() < 86400:  # 24 hours
+                            recent_active = op_id
+                            break
+                
+                if recent_active:
+                    self.last_operation_id = recent_active
+                    print(f"\n✅ Restored operation state: {recent_active}")
+                else:
+                    print("\n✅ Loaded saved state successfully")
+                    
+        except Exception as e:
+            print(f"Warning: Could not load state: {e}")
+            # Initialize with empty state if loading fails
+            self.active_operations = {}
+            self.progress_logs = {}
+            self.last_operation_id = None
+            self.last_settings = {}
+            self.session_data = {}
+    
+    def update_last_settings(self, settings: Dict):
+        """Update and persist the last used settings"""
+        if not hasattr(self, 'last_settings'):
+            self.last_settings = {}
+        self.last_settings = settings.copy()
+        self.save_state()
+    
+    def ensure_attributes(self):
+        """Ensure all required attributes exist (for existing instances)"""
+        if not hasattr(self, 'last_operation_id'):
+            self.last_operation_id = None
+        if not hasattr(self, 'last_settings'):
+            self.last_settings = {}
+        if not hasattr(self, 'session_data'):
+            self.session_data = {}
+        if not hasattr(self, 'state_file'):
+            self.state_file = Path("gui_state.pkl")
+    
+    def get_recovery_info(self):
+        """Get comprehensive information about recoverable state"""
+        self.ensure_attributes()
+        
+        # Find all potentially active operations
+        active_operations = []
+        now = datetime.now()
+        
+        for op_id, op_data in self.active_operations.items():
+            status = op_data.get('status', 'unknown')
+            
+            if status in ['processing', 'consolidating', 'extracting', 'started']:
+                # Check if operation is actually still alive
+                last_activity_str = op_data.get('last_activity', op_data.get('start_time'))
+                is_likely_active = True
+                minutes_since_activity = 0
+                
+                if last_activity_str:
+                    try:
+                        last_activity = datetime.fromisoformat(last_activity_str)
+                        minutes_since_activity = (now - last_activity).total_seconds() / 60
+                        # Consider active if updated within 15 minutes
+                        is_likely_active = minutes_since_activity < 15
+                    except:
+                        is_likely_active = False
+                
+                active_operations.append({
+                    'operation_id': op_id,
+                    'status': status,
+                    'progress': op_data.get('progress_percent', 0),
+                    'current_file': op_data.get('current_file', ''),
+                    'current_operation': op_data.get('current_operation', 'Processing...'),
+                    'start_time': op_data.get('start_time'),
+                    'last_activity': op_data.get('last_activity'),
+                    'stats': op_data.get('stats', {}),
+                    'is_likely_active': is_likely_active,
+                    'minutes_since_activity': round(minutes_since_activity, 1),
+                    'dry_run': op_data.get('dry_run', False)
+                })
+        
+        # Sort by most recent activity
+        active_operations.sort(key=lambda x: x.get('last_activity', ''), reverse=True)
+        
+        # Primary operation is the most recently active one
+        primary_operation = active_operations[0] if active_operations else None
+        
+        recovery_data = {
+            'has_recovery': len(active_operations) > 0,
+            'active_operations': active_operations,
+            'primary_operation': primary_operation,
+            'total_active_operations': len(active_operations),
+            'server_time': now.isoformat(),
+            'has_saved_settings': bool(self.last_settings),
+            'settings': self.last_settings or {}
+        }
+        
+        # Add backward compatibility fields for existing frontend code
+        if primary_operation:
+            recovery_data.update({
+                'operation_id': primary_operation['operation_id'],
+                'status': primary_operation['status'],
+                'progress': primary_operation['progress'],
+                'current_file': primary_operation['current_file']
+            })
+        
+        return recovery_data
 
 gui_state = GUIState()
+# Ensure the instance has all required attributes
+gui_state.ensure_attributes()
+
+# Global thread tracking for cancellation
+active_threads = {}  # operation_id -> thread object
+active_reconstructors = {}  # operation_id -> SafeTakeoutReconstructor instance
 
 class ZipExtractor:
     """Handles zip file extraction with progress tracking"""
@@ -232,6 +538,22 @@ def create_progress_callback(operation_id: str):
 async def home(request: Request):
     """Main page with drag-drop interface"""
     return templates.TemplateResponse("index.html", {"request": request})
+
+@app.get("/health")
+async def health_check():
+    """Simple health check endpoint for frontend connectivity testing"""
+    return JSONResponse({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'active_operations': len([op for op in gui_state.active_operations.values() 
+                                 if op.get('status') in ['processing', 'consolidating', 'extracting', 'started']])
+    })
+
+@app.get("/recovery-info")
+async def get_recovery_info():
+    """Get information about recoverable operations and last settings"""
+    recovery_info = gui_state.get_recovery_info()
+    return JSONResponse(recovery_info)
 
 @app.post("/upload")
 async def upload_files(files: List[UploadFile] = File(...)):
@@ -383,12 +705,33 @@ async def get_progress(operation_id: str):
     if operation_id not in gui_state.active_operations:
         raise HTTPException(status_code=404, detail="Operation not found")
     
+    # Check for hung operations before returning progress
+    hung_ops = gui_state.check_for_hung_operations(timeout_minutes=5)  # 5-minute timeout
+    if operation_id in hung_ops:
+        gui_state.mark_operation_as_hung(operation_id)
+    
     operation = gui_state.active_operations[operation_id]
     recent_logs = gui_state.progress_logs.get(operation_id, [])[-10:]  # Last 10 logs
     
+    # Add hang detection info
+    now = datetime.now()
+    last_activity_str = operation.get('last_activity', operation.get('start_time'))
+    minutes_since_activity = 0
+    if last_activity_str:
+        try:
+            last_activity = datetime.fromisoformat(last_activity_str)
+            minutes_since_activity = (now - last_activity).total_seconds() / 60
+        except:
+            pass
+    
     return JSONResponse({
         'operation': operation,
-        'recent_logs': recent_logs
+        'recent_logs': recent_logs,
+        'hang_detection': {
+            'minutes_since_activity': round(minutes_since_activity, 1),
+            'is_potentially_hung': operation.get('status') == 'hung',
+            'last_activity': last_activity_str
+        }
     })
 
 @app.get("/logs/{operation_id}")
@@ -555,6 +898,16 @@ async def validate_path(request: Request):
 async def start_processing(request: Request):
     """Start processing with local paths - NO UPLOADS"""
     try:
+        # Check if there's already an active operation
+        gui_state.ensure_attributes()
+        for op_id, op_data in gui_state.active_operations.items():
+            if op_data.get('status') in ['processing', 'consolidating', 'extracting', 'started']:
+                return JSONResponse({
+                    'success': False,
+                    'message': f'Another operation is already running (ID: {op_id}). Only one operation allowed at a time.',
+                    'active_operation_id': op_id
+                })
+        
         data = await request.json()
         operation_id = str(uuid.uuid4())
         gui_state.create_operation(operation_id, "processing")
@@ -562,6 +915,18 @@ async def start_processing(request: Request):
         dry_run = data.get('dry_run', False)  # Default to real execution
         verify = data.get('verify', False)
         conflict_mode = data.get('conflict_mode', 'rename')  # Default to rename
+        
+        # Save settings for state persistence
+        settings = {
+            'source_path': data.get('source_path'),
+            'output_path': data.get('output_path'),
+            'dry_run': dry_run,
+            'verify': verify,
+            'conflict_mode': conflict_mode,
+            'timestamp': datetime.now().isoformat()
+        }
+        gui_state.update_last_settings(settings)
+        gui_state.last_operation_id = operation_id
         
         # Smart path detection for source path
         source_input = data['source_path']
@@ -706,6 +1071,9 @@ async def start_processing(request: Request):
                     gui_mode=True  # Send prompts to GUI instead of terminal
                 )
                 
+                # Track reconstructor for cancellation
+                active_reconstructors[operation_id] = reconstructor
+                
                 # Run the consolidation
                 reconstructor.reconstruct(verify_copies=verify)
                 
@@ -764,9 +1132,42 @@ async def start_processing(request: Request):
                     'status': 'failed',
                     'message': f'Processing failed: {str(e)}'
                 })
+            finally:
+                # CRITICAL: Ensure complete resource cleanup
+                try:
+                    # Clean up reconstructor resources
+                    if operation_id in active_reconstructors:
+                        reconstructor = active_reconstructors[operation_id]
+                        if hasattr(reconstructor, 'cleanup_resources'):
+                            reconstructor.cleanup_resources()
+                        del active_reconstructors[operation_id]
+                    
+                    # Clean up thread tracking
+                    if operation_id in active_threads:
+                        del active_threads[operation_id]
+                    
+                    # Final cleanup of any remaining temp files in source directory
+                    if 'source_path' in locals() and source_path and source_path.exists():
+                        try:
+                            cleanup_old_temp_dirs(source_path, callback)
+                        except Exception as final_cleanup_error:
+                            if callback:
+                                callback({'type': 'log', 'message': f'⚠️ Final cleanup warning: {final_cleanup_error}'})
+                
+                    # Force garbage collection to release file handles
+                    import gc
+                    gc.collect()
+                    
+                    if callback:
+                        callback({'type': 'log', 'message': '🧹 Final resource cleanup completed'})
+                        
+                except Exception as cleanup_error:
+                    if callback:
+                        callback({'type': 'log', 'message': f'⚠️ Final cleanup error: {cleanup_error}'})
         
         thread = threading.Thread(target=process_thread)
         thread.daemon = True
+        active_threads[operation_id] = thread  # Track thread for cancellation
         thread.start()
         
         return JSONResponse({
@@ -783,15 +1184,43 @@ async def start_processing(request: Request):
 
 @app.post("/cancel/{operation_id}")
 async def cancel_operation(operation_id: str):
-    """Cancel a running operation"""
-    if operation_id in gui_state.active_operations:
+    """Cancel a running operation and clean up resources"""
+    if operation_id not in gui_state.active_operations:
+        raise HTTPException(status_code=404, detail="Operation not found")
+    
+    try:
+        # 1. Signal the reconstructor to cancel if it exists
+        if operation_id in active_reconstructors:
+            reconstructor = active_reconstructors[operation_id]
+            reconstructor.cancel()
+            print(f"\n⚠️ Cancelling operation {operation_id}")
+        
+        # 2. Update operation status
         gui_state.update_operation(operation_id, {
             'status': 'cancelled',
-            'message': 'Operation cancelled by user'
+            'message': 'Operation cancelled by user',
+            'progress_percent': 0
         })
-        return JSONResponse({'success': True, 'message': 'Operation cancelled'})
-    else:
-        raise HTTPException(status_code=404, detail="Operation not found")
+        
+        # 3. Clean up thread tracking (thread will clean itself up)
+        if operation_id in active_threads:
+            print(f"\u2139️ Thread {operation_id} will terminate gracefully")
+        
+        # 4. Clear GUI state for fresh start
+        gui_state.last_operation_id = None
+        
+        return JSONResponse({
+            'success': True, 
+            'message': 'Operation cancelled successfully',
+            'reset_to_main': True  # Signal frontend to reset
+        })
+        
+    except Exception as e:
+        print(f"Error cancelling operation: {e}")
+        return JSONResponse({
+            'success': False,
+            'message': f'Error cancelling operation: {str(e)}'
+        })
 
 @app.post("/open-folder")
 async def open_folder(request: Request):

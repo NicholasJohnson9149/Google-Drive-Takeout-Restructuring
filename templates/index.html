@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Google Drive Takeout Restructuring</title>
+    <title>📁 Restructuring</title>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -168,9 +168,6 @@
                         <button type="button" class="btn" onclick="cancelOperation()">
                             Cancel
                         </button>
-                        <button type="button" class="btn" onclick="showMainInterface()">
-                            ← Back
-                        </button>
                     </div>
                 </div>
             </div>
@@ -245,13 +242,356 @@
         let spaceInfo = {};
         let sourcePath = '';
         let exportPath = '';
+        let isPickerActive = false;  // Track if file picker is open
 
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
             setupDropZone();
             updateStartButton();
             setupFormInteractions();
+            checkForRecovery();
         });
+        
+        // Enhanced state recovery with localStorage backup
+        async function checkForRecovery() {
+            // Always try to restore client state first (instant feedback)
+            restoreClientState();
+            
+            // Try to connect to server with retries
+            let recovery = null;
+            let attempts = 0;
+            const maxAttempts = 3;
+            
+            while (attempts < maxAttempts && !recovery) {
+                attempts++;
+                try {
+                    // Try to get server state with timeout
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 2000 + attempts * 1000); // Increasing timeout
+                    
+                    const response = await fetch('/recovery-info', {
+                        signal: controller.signal,
+                        cache: 'no-cache'
+                    });
+                    clearTimeout(timeoutId);
+                    
+                    if (!response.ok) {
+                        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    recovery = await response.json();
+                    break; // Success - exit retry loop
+                    
+                } catch (error) {
+                    console.log(`Attempt ${attempts}/${maxAttempts} failed:`, error.message);
+                    
+                    if (attempts < maxAttempts) {
+                        // Wait before retrying (exponential backoff)
+                        await new Promise(resolve => setTimeout(resolve, attempts * 500));
+                    }
+                }
+            }
+            
+            if (recovery) {
+                console.log('✅ Server state recovered:', recovery);
+                
+                if (recovery.has_recovery && recovery.primary_operation) {
+                    const operation = recovery.primary_operation;
+                    
+                    // Check if operation is likely still active
+                    if (operation.is_likely_active) {
+                        console.log(`🔄 Resuming active operation: ${operation.operation_id}`);
+                        
+                        // Set current operation and switch to progress interface
+                        currentOperation = operation.operation_id;
+                        showProgressInterface();
+                        
+                        // Update UI with current state
+                        updateProgress({
+                            current_operation: operation.current_operation || 'Processing...',
+                            progress_percent: operation.progress || 0,
+                            current_file: operation.current_file || 'Resuming...',
+                            status: operation.status || 'processing',
+                            stats: operation.stats || {}
+                        });
+                        
+                        // Start monitoring
+                        startProgressMonitoring();
+                        
+                        // Show recovery notification
+                        showRecoveryNotification(operation);
+                        
+                        console.log('✅ Successfully resumed active operation');
+                        
+                    } else {
+                        // Operation appears stale - offer to clean up or continue
+                        showStaleOperationDialog(operation);
+                    }
+                    
+                } else if (recovery.has_saved_settings && recovery.settings) {
+                    // No active operation, but restore saved settings from server
+                    const serverSettings = recovery.settings;
+                    
+                    // Merge server settings with client state (server takes precedence for paths)
+                    if (serverSettings.source_path && serverSettings.source_path !== sourcePath) {
+                        sourcePath = serverSettings.source_path;
+                        document.getElementById('folder-path').value = serverSettings.source_path;
+                        updatePathDisplay('path-display', serverSettings.source_path);
+                        // Re-validate the path to get current ZIP file list
+                        await validatePath();
+                    }
+                    
+                    if (serverSettings.output_path && serverSettings.output_path !== exportPath) {
+                        exportPath = serverSettings.output_path;
+                        updatePathDisplay('export-path-display', serverSettings.output_path);
+                    }
+                    
+                    // Restore other settings
+                    if (serverSettings.dry_run !== undefined) {
+                        document.getElementById('dry-run').checked = serverSettings.dry_run;
+                        updateCheckboxVisual();
+                    }
+                    
+                    if (serverSettings.verify !== undefined) {
+                        document.getElementById('verify-files').checked = serverSettings.verify;
+                        updateVerifyVisual();
+                    }
+                    
+                    if (serverSettings.conflict_mode) {
+                        const radio = document.querySelector(`input[name="conflict"][value="${serverSettings.conflict_mode}"]`);
+                        if (radio) {
+                            radio.checked = true;
+                            updateRadioVisuals();
+                        }
+                    }
+                    
+                    updateStartButton();
+                    console.log('✅ Restored server settings');
+                }
+                
+            } else {
+                // Failed to connect to server after retries
+                console.log('🔌 Server not available after retries - continuing with local state');
+                
+                // Only show error if we don't have any local state to work with
+                const hasLocalState = sourcePath || exportPath || foundZips.length > 0;
+                if (!hasLocalState) {
+                    showError('Server not available. Using offline mode with limited features.', 4000);
+                }
+            }
+        }
+        
+        // Save client state to localStorage for backup recovery
+        function saveClientState() {
+            const state = {
+                sourcePath: sourcePath,
+                exportPath: exportPath,
+                foundZips: foundZips,
+                currentOperation: currentOperation,
+                lastSaved: new Date().toISOString()
+            };
+            
+            try {
+                localStorage.setItem('gdrive_consolidator_state', JSON.stringify(state));
+            } catch (e) {
+                console.log('Could not save to localStorage:', e);
+            }
+        }
+        
+        // Restore client state from localStorage
+        function restoreClientState() {
+            try {
+                const saved = localStorage.getItem('gdrive_consolidator_state');
+                if (saved) {
+                    const state = JSON.parse(saved);
+                    
+                    // Only restore if recent (within 24 hours)
+                    const saveTime = new Date(state.lastSaved);
+                    const now = new Date();
+                    const hoursSince = (now - saveTime) / (1000 * 60 * 60);
+                    
+                    if (hoursSince < 24) {
+                        if (state.sourcePath) {
+                            sourcePath = state.sourcePath;
+                            document.getElementById('folder-path').value = state.sourcePath;
+                            updatePathDisplay('path-display', state.sourcePath);
+                        }
+                        if (state.exportPath) {
+                            exportPath = state.exportPath;
+                            updatePathDisplay('export-path-display', state.exportPath);
+                        }
+                        if (state.foundZips) {
+                            foundZips = state.foundZips;
+                            displayFoundZips();
+                        }
+                        
+                        updateStartButton();
+                        console.log('✅ Restored client state from localStorage');
+                    }
+                }
+            } catch (e) {
+                console.log('Could not restore from localStorage:', e);
+            }
+        }
+        
+        // Show recovery notification
+        function showRecoveryNotification(operation) {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+                background: #d4edda; border: 1px solid #c3e6cb; color: #155724;
+                padding: 15px 25px; border-radius: 8px; z-index: 1000;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-family: 'Poppins', sans-serif;
+                max-width: 500px; text-align: center;
+            `;
+            
+            notification.innerHTML = `
+                🔄 <strong>Operation Resumed</strong><br>
+                <small>Continuing ${operation.dry_run ? 'dry run' : 'processing'} from ${operation.progress}% - 
+                ${operation.minutes_since_activity}min since last activity</small>
+            `;
+            
+            document.body.appendChild(notification);
+            
+            // Auto-remove after 4 seconds
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+            }, 4000);
+        }
+        
+        // Show dialog for stale operations
+        function showStaleOperationDialog(operation) {
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.7); display: flex; justify-content: center; align-items: center;
+                z-index: 10000; font-family: 'Poppins', sans-serif;
+            `;
+            
+            modal.innerHTML = `
+                <div style="background: white; padding: 30px; border-radius: 12px; max-width: 500px; text-align: center;">
+                    <h3 style="color: #ffc107; margin-bottom: 20px;">⚠️ Stale Operation Found</h3>
+                    <p style="margin-bottom: 20px; line-height: 1.5;">
+                        Found an operation that hasn't been active for ${operation.minutes_since_activity} minutes:<br>
+                        <strong>${operation.operation_id}</strong><br><br>
+                        Last status: ${operation.status} (${operation.progress}% complete)
+                    </p>
+                    <div style="display: flex; gap: 12px; justify-content: center;">
+                        <button onclick="this.closest('div[style*=position]').remove(); resumeStaleOperation('${operation.operation_id}')" 
+                                style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                            Try Resume
+                        </button>
+                        <button onclick="this.closest('div[style*=position]').remove(); cleanupStaleOperation('${operation.operation_id}')" 
+                                style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                            Clean Up
+                        </button>
+                        <button onclick="this.closest('div[style*=position]').remove()" 
+                                style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                            Ignore
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+        }
+        
+        // Resume a stale operation
+        async function resumeStaleOperation(operationId) {
+            currentOperation = operationId;
+            showProgressInterface();
+            startProgressMonitoring();
+            showError('⏳ Attempting to resume operation...', 3000);
+        }
+        
+        // Clean up a stale operation
+        async function cleanupStaleOperation(operationId) {
+            try {
+                const response = await fetch(`/cancel/${operationId}`, { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    showError('✅ Stale operation cleaned up successfully', 3000);
+                } else {
+                    showError('⚠️ Could not clean up stale operation: ' + result.message, 5000);
+                }
+            } catch (error) {
+                showError('⚠️ Error cleaning up stale operation: ' + error.message, 5000);
+            }
+        }
+        
+        // Restore form settings from saved state
+        function restoreSettings(settings) {
+            if (settings.source_path) {
+                sourcePath = settings.source_path;
+                document.getElementById('folder-path').value = settings.source_path;
+                updatePathDisplay('source-path-display', settings.source_path);
+            }
+            
+            if (settings.output_path) {
+                exportPath = settings.output_path;
+                document.getElementById('export-path').value = settings.output_path;
+                updatePathDisplay('export-path-display', settings.output_path);
+            }
+            
+            if (settings.dry_run !== undefined) {
+                document.getElementById('dry-run').checked = settings.dry_run;
+                updateCheckboxVisual();
+            }
+            
+            if (settings.verify !== undefined) {
+                document.getElementById('verify-files').checked = settings.verify;
+                updateVerifyVisual();
+            }
+            
+            if (settings.conflict_mode) {
+                const radio = document.querySelector(`input[name="conflict"][value="${settings.conflict_mode}"]`);
+                if (radio) {
+                    radio.checked = true;
+                    updateRadioVisuals();
+                }
+            }
+            
+            updateStartButton();
+            console.log('✅ Restored previous settings');
+        }
+        
+        // Update progress display with current data
+        function updateProgressDisplay(data) {
+            if (data.progress_percent !== undefined) {
+                const progressBar = document.querySelector('.progress-bar');
+                const progressText = document.querySelector('.progress-percent');
+                
+                if (progressBar) {
+                    progressBar.style.width = `${data.progress_percent}%`;
+                }
+                if (progressText) {
+                    progressText.textContent = `${Math.round(data.progress_percent)}%`;
+                }
+            }
+            
+            if (data.current_file) {
+                const currentFileEl = document.querySelector('.current-file');
+                if (currentFileEl) {
+                    currentFileEl.textContent = data.current_file;
+                }
+            }
+            
+            if (data.status) {
+                const statusEl = document.getElementById('current-operation');
+                if (statusEl) {
+                    const statusMap = {
+                        'processing': 'Processing files...',
+                        'consolidating': 'Consolidating structure...',
+                        'extracting': 'Extracting ZIP files...',
+                        'started': 'Starting operation...'
+                    };
+                    statusEl.textContent = statusMap[data.status] || data.status;
+                }
+            }
+        }
 
         // Setup form interactions
         function setupFormInteractions() {
@@ -353,11 +693,45 @@
             });
         }
 
+        // Safe directory picker wrapper
+        async function safeShowDirectoryPicker() {
+            if (isPickerActive) {
+                throw new Error('File picker is already open. Please close it first.');
+            }
+            
+            if (!('showDirectoryPicker' in window)) {
+                throw new Error('Directory picker not supported in this browser');
+            }
+            
+            try {
+                isPickerActive = true;
+                
+                // Disable all picker buttons while active
+                const pickerButtons = document.querySelectorAll('button[onclick*="select"]');
+                pickerButtons.forEach(btn => {
+                    btn.disabled = true;
+                    btn.style.opacity = '0.6';
+                });
+                
+                const dirHandle = await window.showDirectoryPicker();
+                return dirHandle;
+            } finally {
+                isPickerActive = false;
+                
+                // Re-enable picker buttons
+                const pickerButtons = document.querySelectorAll('button[onclick*="select"]');
+                pickerButtons.forEach(btn => {
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                });
+            }
+        }
+
         // Enhanced folder selection using native dialog
         async function selectTakeoutFolder() {
             try {
                 if ('showDirectoryPicker' in window) {
-                    const dirHandle = await window.showDirectoryPicker();
+                    const dirHandle = await safeShowDirectoryPicker();
                     // Note: Web API doesn't give full path for security reasons
                     // User needs to type the full path manually
                     const fullPath = prompt(`Enter the full path to "${dirHandle.name}":
@@ -378,7 +752,11 @@
                     }
                 }
             } catch (error) {
-                if (error.name !== 'AbortError') {
+                if (error.name === 'AbortError') {
+                    console.log('User cancelled folder selection');
+                } else if (error.message.includes('picker is already open')) {
+                    showError('Please close the current file picker before opening another one.', 3000);
+                } else {
                     showError(`Error selecting folder: ${error.message}`);
                 }
             }
@@ -388,18 +766,20 @@
         async function selectExportFolder() {
             try {
                 if ('showDirectoryPicker' in window) {
-                    const dirHandle = await window.showDirectoryPicker();
+                    const dirHandle = await safeShowDirectoryPicker();
                     // Prompt for full path since browser can't provide it
                     const fullPath = prompt(`Enter the full path to "${dirHandle.name}":\n(Or create a new folder in this location)`, `/Volumes/Creator Pro/${dirHandle.name}`);
                     if (fullPath) {
                         exportPath = fullPath;
                         updatePathDisplay('export-path-display', fullPath);
+                        saveClientState(); // Save export path
                     }
                 } else {
                     const path = prompt('Enter the full path for export folder:', '/Volumes/Creator Pro/output');
                     if (path) {
                         exportPath = path;
                         updatePathDisplay('export-path-display', path);
+                        saveClientState(); // Save export path
                     }
                 }
                 updateStartButton();
@@ -467,6 +847,7 @@
                 foundZips = [];
                 displayFoundZips();
                 updateStartButton();
+                saveClientState(); // Save state changes
                 return;
             }
 
@@ -482,9 +863,11 @@
                 if (result.success) {
                     foundZips = result.zip_files;
                     spaceInfo = result.space_info || {};
+                    sourcePath = path;
                     displayFoundZips();
                     displaySpaceRequirements();
                     updateStartButton();
+                    saveClientState(); // Save successful state
                     showSuccess(`Found ${foundZips.length} ZIP files`);
                 } else {
                     foundZips = [];
@@ -492,12 +875,14 @@
                     displayFoundZips();
                     displaySpaceRequirements();
                     updateStartButton();
+                    saveClientState();
                     showError(result.message || 'Invalid path');
                 }
             } catch (error) {
                 foundZips = [];
                 displayFoundZips();
                 updateStartButton();
+                saveClientState();
                 showError(`Error validating path: ${error.message}`);
             }
         }
@@ -648,6 +1033,9 @@
             const verifyFiles = document.getElementById('verify-files').checked;
             const conflictMode = document.querySelector('input[name="conflict"]:checked').value;
 
+            // Save state before starting
+            saveClientState();
+
             try {
                 const response = await fetch('/start-processing', {
                     method: 'POST',
@@ -662,9 +1050,17 @@
                 });
 
                 const result = await response.json();
-
+                
                 if (result.success) {
                     currentOperation = result.operation_id;
+                    saveClientState(); // Save with operation ID
+                    showProgressInterface();
+                    startProgressMonitoring();
+                } else if (result.active_operation_id) {
+                    // Another operation is running - switch to it
+                    showError('Switching to existing operation...', 2000);
+                    currentOperation = result.active_operation_id;
+                    saveClientState();
                     showProgressInterface();
                     startProgressMonitoring();
                 } else {
@@ -675,9 +1071,16 @@
             }
         }
 
-        // Progress monitoring
+        // Progress monitoring with hang detection
+        let consecutiveHangChecks = 0;
+        let lastProgressValue = 0;
+        let lastProgressTime = Date.now();
+        
         function startProgressMonitoring() {
             if (progressInterval) clearInterval(progressInterval);
+            consecutiveHangChecks = 0;
+            lastProgressValue = 0;
+            lastProgressTime = Date.now();
             
             progressInterval = setInterval(async () => {
                 if (!currentOperation) return;
@@ -685,6 +1088,11 @@
                 try {
                     const response = await fetch(`/progress/${currentOperation}`);
                     const data = await response.json();
+                    
+                    // Check for hang detection
+                    if (data.hang_detection) {
+                        handleHangDetection(data.hang_detection, data.operation);
+                    }
                     
                     updateProgress(data.operation);
                     
@@ -702,11 +1110,130 @@
                         clearInterval(progressInterval);
                         showError(data.operation.message || 'Processing failed');
                         showMainInterface();
+                    } else if (data.operation.status === 'hung') {
+                        clearInterval(progressInterval);
+                        showHungOperationDialog(data.operation);
                     }
                 } catch (error) {
                     console.error('Error fetching progress:', error);
+                    // Increment consecutive error count
+                    consecutiveHangChecks++;
+                    
+                    // If we've had 3+ consecutive errors, show connection issue warning
+                    if (consecutiveHangChecks >= 3) {
+                        showError('⚠️ Connection issues detected. The operation may still be running in the background.', 8000);
+                        document.getElementById('current-operation').textContent = 'Connection Issues - Please wait...';
+                    }
                 }
-            }, 2000); // Update every 2 seconds (not too frequent)
+            }, 2000); // Update every 2 seconds
+        }
+        
+        function handleHangDetection(hangInfo, operation) {
+            const minutesSinceActivity = hangInfo.minutes_since_activity;
+            const currentProgress = operation.progress_percent || 0;
+            const now = Date.now();
+            
+            // Reset consecutive hang checks if we got a successful response
+            consecutiveHangChecks = 0;
+            
+            // Check if progress has actually advanced
+            if (currentProgress > lastProgressValue) {
+                lastProgressValue = currentProgress;
+                lastProgressTime = now;
+            } else {
+                // No progress change - check time since last change
+                const minutesSinceProgressChange = (now - lastProgressTime) / (1000 * 60);
+                
+                if (minutesSinceProgressChange > 3) { // 3 minutes without progress
+                    showProgressStallWarning(minutesSinceProgressChange);
+                }
+            }
+            
+            // Show warning if backend reports long inactivity
+            if (minutesSinceActivity > 2 && minutesSinceActivity <= 5) {
+                showActivityWarning(minutesSinceActivity);
+            }
+        }
+        
+        function showProgressStallWarning(minutes) {
+            const warningEl = document.getElementById('progress-warning');
+            if (!warningEl) {
+                const progressSection = document.querySelector('.progress-section');
+                const warning = document.createElement('div');
+                warning.id = 'progress-warning';
+                warning.style.cssText = `
+                    background: #fff3cd; 
+                    border: 1px solid #ffeaa7; 
+                    border-radius: 6px; 
+                    padding: 12px; 
+                    margin-top: 12px; 
+                    color: #856404;
+                    font-size: 0.9rem;
+                `;
+                warning.innerHTML = `
+                    ⚠️ <strong>No progress detected for ${minutes.toFixed(1)} minutes</strong><br>
+                    <small>The operation may be processing large files or experiencing delays. This is often normal for large datasets.</small>
+                `;
+                progressSection.appendChild(warning);
+            }
+        }
+        
+        function showActivityWarning(minutes) {
+            const statusEl = document.getElementById('operation-status');
+            if (statusEl) {
+                statusEl.textContent = `Checking activity (${minutes.toFixed(1)}m since last update)`;
+                statusEl.style.color = '#ffc107';
+            }
+        }
+        
+        function showHungOperationDialog(operation) {
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.7); display: flex; justify-content: center; align-items: center;
+                z-index: 10000; font-family: 'Poppins', sans-serif;
+            `;
+            
+            modal.innerHTML = `
+                <div style="background: white; padding: 30px; border-radius: 12px; max-width: 500px; text-align: center;">
+                    <h3 style="color: #dc3545; margin-bottom: 20px;">⚠️ Operation May Be Hung</h3>
+                    <p style="margin-bottom: 20px; line-height: 1.5;">
+                        The operation hasn't reported progress updates for several minutes. This could mean:
+                        <br><br>
+                        • Processing a very large file<br>
+                        • System resource constraints<br>
+                        • The operation has genuinely hung<br>
+                    </p>
+                    <div style="display: flex; gap: 12px; justify-content: center;">
+                        <button onclick="this.closest('div[style*=position]').remove(); waitLonger()" 
+                                style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                            Wait Longer
+                        </button>
+                        <button onclick="this.closest('div[style*=position]').remove(); forceCancel()" 
+                                style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                            Force Cancel
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+        }
+        
+        function waitLonger() {
+            // Clear any warnings and restart monitoring
+            const warning = document.getElementById('progress-warning');
+            if (warning) warning.remove();
+            
+            lastProgressTime = Date.now(); // Reset progress timer
+            startProgressMonitoring();
+            showError('⏳ Continuing to wait for operation...', 3000);
+        }
+        
+        async function forceCancel() {
+            if (confirm('⚠️ Are you sure you want to force cancel this operation?\n\nThis will terminate all processing immediately.')) {
+                await cancelOperation();
+            }
         }
 
         // Update progress display
@@ -909,10 +1436,10 @@
             return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
         }
 
-        function showError(message) {
+        function showError(message, duration = 5000) {
             document.getElementById('error-message').textContent = message;
             document.getElementById('error-toast').style.display = 'block';
-            setTimeout(() => hideError(), 5000);
+            setTimeout(() => hideError(), duration);
         }
 
         function showSuccess(message) {
@@ -930,10 +1457,57 @@
             }
         }
 
-        function cancelOperation() {
-            if (currentOperation && confirm('Cancel current operation?')) {
-                fetch(`/cancel/${currentOperation}`, { method: 'POST' });
-                clearInterval(progressInterval);
+        async function cancelOperation() {
+            if (!currentOperation) {
+                showError('No operation to cancel');
+                return;
+            }
+            
+            if (!confirm('⚠️ Are you sure you want to cancel the current operation?\n\nThis will stop all processing and return to the main screen.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/cancel/${currentOperation}`, { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Stop progress monitoring
+                    if (progressInterval) {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                    }
+                    
+                    // Reset current operation
+                    currentOperation = null;
+                    
+                    // Show success message
+                    showSuccess('✅ Operation cancelled successfully');
+                    
+                    // Return to main interface for fresh start
+                    showMainInterface();
+                    
+                    // Clear any form data to start completely fresh
+                    sourcePath = '';
+                    exportPath = '';
+                    document.getElementById('folder-path').value = '';
+                    document.getElementById('export-path').value = '';
+                    updatePathDisplay('source-path-display', '');
+                    updatePathDisplay('export-path-display', '');
+                    updateStartButton();
+                    
+                    console.log('✅ Reset to fresh state after cancellation');
+                } else {
+                    showError('Failed to cancel operation: ' + (result.message || 'Unknown error'));
+                }
+            } catch (error) {
+                showError('Error cancelling operation: ' + error.message);
+                // Still try to reset the interface
+                if (progressInterval) {
+                    clearInterval(progressInterval);
+                    progressInterval = null;
+                }
+                currentOperation = null;
                 showMainInterface();
             }
         }
@@ -1026,7 +1600,7 @@ Alternatively, use the manual instructions that will appear next.
             
             if (confirm(instructions + '\n\nClick OK to open file picker, Cancel for manual instructions')) {
                 try {
-                    window.showDirectoryPicker().then(dirHandle => {
+                    safeShowDirectoryPicker().then(dirHandle => {
                         alert('Great! You can now browse your organized files in the selected folder.');
                     }).catch(e => {
                         navigator.clipboard.writeText(outputPath);
