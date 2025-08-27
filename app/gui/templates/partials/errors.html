@@ -1,0 +1,69 @@
+<!-- Error Toast -->
+<div class="toast error-toast" id="error-toast" style="display: none;">
+    <span id="error-message">Error message</span>
+    <button type="button" onclick="hideError()">×</button>
+</div>
+
+<!-- Error Interface (for critical errors) -->
+<div class="interface" id="error-interface" style="display: none;">
+    <div class="error-panel">
+        <div class="panel-header">
+            <h2>❌ Error Occurred</h2>
+        </div>
+        
+        <div class="error-content" id="error-content">
+            <div class="error-icon">⚠️</div>
+            <div class="error-details">
+                <h3 id="error-title">Something went wrong</h3>
+                <p id="error-description">An unexpected error occurred during processing.</p>
+                <div class="error-technical" id="error-technical" style="display: none;">
+                    <details>
+                        <summary>Technical Details</summary>
+                        <pre id="error-stack"></pre>
+                    </details>
+                </div>
+            </div>
+        </div>
+        
+        <div class="action-buttons">
+            <button type="button" class="btn-primary" onclick="retryOperation()">
+                Try Again
+            </button>
+            <button type="button" class="btn" onclick="reportError()">
+                Report Issue
+            </button>
+            <button type="button" class="btn" onclick="startOver()">
+                Start Over
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Recovery Interface -->
+<div class="interface" id="recovery-interface" style="display: none;">
+    <div class="recovery-panel">
+        <div class="panel-header">
+            <h2>🔄 Recovery Options</h2>
+        </div>
+        
+        <div class="recovery-content">
+            <p>It looks like there was an interrupted operation. What would you like to do?</p>
+            
+            <div class="recovery-options">
+                <button type="button" class="btn-primary" onclick="resumeOperation()">
+                    🔄 Resume Previous Operation
+                </button>
+                <button type="button" class="btn" onclick="clearState()">
+                    🗑️ Clear State & Start Fresh
+                </button>
+                <button type="button" class="btn" onclick="viewLogs()">
+                    📝 View Previous Logs
+                </button>
+            </div>
+            
+            <div class="recovery-details" id="recovery-details">
+                <!-- Previous operation details will be shown here -->
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Restructuring{% endblock %}</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <link rel="stylesheet" href="/static/style.css">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <div class="app">
+        <header class="app-header">
+            <h1>{% block header_title %}Google Drive Takeout Restructuring{% endblock %}</h1>
+            <p class="subtitle">{% block header_subtitle %}This app automatically extracts and reorganizes the ZIP files from a Google Takeout export, restoring your original Google Drive folder structure so you can easily re-upload it or keep it as a clean local backup.{% endblock %}</p>
+        </header>
+
+        <main class="app-main">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

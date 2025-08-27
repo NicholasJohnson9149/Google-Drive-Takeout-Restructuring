@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+#ignore any AI tooling 
+.claude
+
+# Project specific
+gui_state.pkl
+takeout_logs/
+gdrive_env/
+

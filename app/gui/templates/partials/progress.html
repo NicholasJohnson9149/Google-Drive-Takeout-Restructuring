@@ -1,0 +1,48 @@
+<div class="interface" id="progress-interface" style="display: none;">
+    <div class="progress-panel">
+        <div class="panel-header">
+            <h2>Processing Files</h2>
+            <button type="button" class="btn-small" onclick="showLogs()">
+                View Logs
+            </button>
+        </div>
+        
+        <div class="progress-section">
+            <div class="current-operation" id="current-operation">Starting…</div>
+            
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+            </div>
+            
+            <div class="progress-stats">
+                <span id="progress-text">0% - Starting…</span>
+                <span id="operation-status">starting</span>
+            </div>
+        </div>
+        
+        <div class="stats-grid" id="stats-display" style="display: none;">
+            <div class="stat">
+                <div class="stat-value" id="total-files">0</div>
+                <div class="stat-label">Total Files</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="processed-files">0</div>
+                <div class="stat-label">Processed</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="skipped-files">0</div>
+                <div class="stat-label">Skipped</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="error-count">0</div>
+                <div class="stat-label">Errors</div>
+            </div>
+        </div>
+        
+        <div class="action-buttons">
+            <button type="button" class="btn" onclick="cancelOperation()">
+                Cancel
+            </button>
+        </div>
+    </div>
+</div>

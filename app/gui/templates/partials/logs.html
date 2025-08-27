@@ -1,0 +1,54 @@
+<!-- Logs Modal/Overlay -->
+<div class="modal-overlay" id="logs-overlay" style="display: none;">
+    <div class="modal logs-modal">
+        <div class="modal-header">
+            <h3>📝 Processing Logs</h3>
+            <button type="button" class="btn-close" onclick="hideLogs()">×</button>
+        </div>
+        
+        <div class="modal-body">
+            <div class="logs-controls">
+                <button type="button" class="btn-small" onclick="refreshLogs()">
+                    🔄 Refresh
+                </button>
+                <button type="button" class="btn-small" onclick="clearLogsDisplay()">
+                    🗑️ Clear Display
+                </button>
+                <button type="button" class="btn-small" onclick="downloadCurrentLogs()">
+                    💾 Download
+                </button>
+                <label class="checkbox-row">
+                    <input type="checkbox" id="auto-scroll-logs" checked>
+                    <span class="checkbox-label">Auto-scroll</span>
+                </label>
+            </div>
+            
+            <div class="logs-container">
+                <div class="logs-content" id="logs-content">
+                    <div class="log-entry info">
+                        <span class="log-timestamp">Loading...</span>
+                        <span class="log-message">Fetching logs...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="modal-footer">
+            <button type="button" class="btn" onclick="hideLogs()">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Embedded logs section (for main interface) -->
+<div class="logs-section" id="logs-section" style="display: none;">
+    <div class="logs-header">
+        <h4>Recent Activity</h4>
+        <div class="logs-actions">
+            <button type="button" class="btn-small" onclick="showAllLogs()">View All</button>
+        </div>
+    </div>
+    
+    <div class="logs-preview" id="logs-preview">
+        <!-- Recent log entries will be shown here -->
+    </div>
+</div>

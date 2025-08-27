@@ -260,6 +260,25 @@ body {
     background: #f8f9fa;
     border-radius: 8px;
     border: 1px solid #dee2e6;
+    transition: all 0.3s ease;
+}
+
+/* Success state - files found */
+.file-list.files-found {
+    background: #d4edda;
+    border: 2px solid #28a745;
+}
+
+/* Warning state - potential issues */
+.file-list.files-warning {
+    background: #fff3cd;
+    border: 2px solid #ffc107;
+}
+
+/* Error state - no files or wrong files */
+.file-list.no-files {
+    background: #f8d7da;
+    border: 2px solid #dc3545;
 }
 
 .file-list h3 {
@@ -267,6 +286,18 @@ body {
     font-weight: 600;
     color: #1a1a1a;
     margin-bottom: 16px;
+}
+
+.file-list.files-found h3 {
+    color: #155724;
+}
+
+.file-list.no-files h3 {
+    color: #721c24;
+}
+
+.file-list.files-warning h3 {
+    color: #856404;
 }
 
 .zip-list {
@@ -283,6 +314,36 @@ body {
     background: white;
     border: 1px solid #dee2e6;
     border-radius: 6px;
+}
+
+/* Space info section */
+.space-info {
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+
+.space-info.space-ok {
+    background: rgba(40, 167, 69, 0.1);
+    border: 1px solid #28a745;
+    color: #155724;
+}
+
+.space-info.space-warning {
+    background: rgba(255, 193, 7, 0.1);
+    border: 1px solid #ffc107;
+    color: #856404;
+}
+
+.space-summary {
+    line-height: 1.6;
+}
+
+.space-summary .warning {
+    color: #dc3545;
+    font-weight: 600;
+    margin-top: 8px;
 }
 
 .zip-name {
@@ -468,4 +529,161 @@ body {
 #progress-interface,
 #completion-interface {
     display: none;
+}
+
+/* Success toast */
+.success-toast {
+    background: #fff;
+    border: 1px solid #28a745;
+    color: #28a745;
+}
+
+/* Output path dialog */
+.output-path-dialog {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.output-path-dialog .dialog-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+}
+
+.output-path-dialog .dialog-content {
+    position: relative;
+    background: white;
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 600px;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+    margin: 20px;
+}
+
+.output-path-dialog h3 {
+    margin: 0 0 16px 0;
+    color: #333;
+    font-size: 1.3rem;
+    font-weight: 600;
+}
+
+.output-path-dialog p {
+    margin: 0 0 20px 0;
+    color: #666;
+    line-height: 1.5;
+}
+
+.path-suggestions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.path-suggestion {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px;
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.path-suggestion:hover {
+    border-color: #dee2e6;
+    background: #f8f9fa;
+}
+
+.path-suggestion input[type="radio"]:checked + .suggestion-details {
+    color: #007bff;
+}
+
+.path-suggestion input[type="radio"]:checked + .suggestion-details .suggestion-path {
+    font-weight: 600;
+}
+
+.path-suggestion input[type="radio"] {
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.suggestion-details {
+    flex: 1;
+}
+
+.suggestion-path {
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+    margin-bottom: 4px;
+    word-break: break-all;
+}
+
+.suggestion-status {
+    font-size: 0.85rem;
+}
+
+.status-exists {
+    color: #28a745;
+}
+
+.status-can-create {
+    color: #007bff;
+}
+
+.status-cannot-create {
+    color: #dc3545;
+}
+
+.status-manual {
+    color: #6c757d;
+}
+
+.manual-path-input {
+    margin: 16px 0;
+}
+
+.manual-path-input input {
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+    border: 2px solid #dee2e6;
+    border-radius: 6px;
+}
+
+.manual-path-input input:focus {
+    border-color: #007bff;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+}
+
+.path-help {
+    margin-top: 8px;
+}
+
+.path-help small {
+    color: #6c757d;
+    font-style: italic;
+}
+
+.dialog-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid #e9ecef;
 }
