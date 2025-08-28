@@ -307,13 +307,18 @@ async def cleanup_temp_files():
     try:
         from utils.fs_utils import cleanup_old_temp_dirs, cleanup_system_temp_files
         
-        # Clean up temporary directories
-        cleanup_old_temp_dirs()
-        cleanup_system_temp_files()
+        # Create a simple callback for logging
+        def log_callback(data):
+            if 'message' in data:
+                print(f"Cleanup: {data['message']}")
+        
+        # Clean up temporary directories with callback for logging
+        cleanup_old_temp_dirs(callback=log_callback)
+        cleanup_system_temp_files(callback=log_callback)
         
         return JSONResponse({
             'success': True,
-            'message': 'Temporary files cleaned up'
+            'message': 'Temporary files cleaned up using direct deletion (safe for exFAT drives)'
         })
         
     except Exception as e:

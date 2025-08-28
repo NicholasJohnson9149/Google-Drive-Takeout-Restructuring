@@ -12,7 +12,7 @@ from app.core.rebuilder_v2 import SafeTakeoutReconstructor
 from app.core.duplicate_checker import DuplicateStrategy
 
 
-def test_improved_rebuilder():
+def test_improved_rebuilder(tmp_path):
     """Test the improved rebuilder with your real data"""
     
     print("🚀 Testing Improved SafeTakeoutReconstructor")
@@ -34,10 +34,25 @@ def test_improved_rebuilder():
             stats = data.get('stats', {})
             print(f"Stats: {stats}")
     
-    # Initialize improved reconstructor
+    # Create mock takeout structure
+    source_dir = tmp_path / "mock_takeout"
+    source_dir.mkdir()
+    
+    # Create some mock Drive files
+    drive_dir = source_dir / "Takeout" / "Drive"
+    drive_dir.mkdir(parents=True)
+    
+    # Add test files
+    (drive_dir / "test_doc.txt").write_text("Test document")
+    (drive_dir / "subfolder").mkdir()
+    (drive_dir / "subfolder" / "nested.txt").write_text("Nested file")
+    
+    dest_dir = tmp_path / "output"
+    
+    # Initialize improved reconstructor with mock paths
     reconstructor = SafeTakeoutReconstructor(
-        takeout_path="/Volumes/Creator Pro/gDrive-test-output/extracted_takeout",
-        export_path="/tmp/improved_flat_test",
+        takeout_path=str(source_dir),
+        export_path=str(dest_dir),
         dry_run=True,  # Safe testing
         duplicate_strategy=DuplicateStrategy.HASH,  # Proper duplicate detection
         progress_callback=progress_callback
@@ -64,11 +79,11 @@ def test_improved_rebuilder():
             for error in reconstructor.errors[:5]:
                 print(f"  - {error.error_type}: {error.error_message}")
         
-        return success
+        assert success, "Reconstruction should succeed in dry run mode"
         
     except Exception as e:
         print(f"❌ Error during testing: {e}")
-        return False
+        assert False, f"Test failed with error: {e}"
     
     finally:
         # Clean up resources

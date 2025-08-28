@@ -163,24 +163,17 @@ class TestSafeTakeoutReconstructor:
         assert dest_file.read_bytes() == test_data
     
     def test_chunked_copy_failure(self, reconstructor, temp_dir):
-        """Test chunked copy with permission error"""
+        """Test chunked copy with non-existent parent directory"""
         source_file = temp_dir / "source.bin"
-        dest_file = temp_dir / "readonly_dir" / "dest.bin"
+        # Create a destination with non-existent parent directories
+        dest_file = temp_dir / "non_existent" / "deep" / "path" / "dest.bin"
         
         source_file.write_bytes(b"test data")
         
-        # Create readonly directory to cause permission error
-        readonly_dir = temp_dir / "readonly_dir"
-        readonly_dir.mkdir(mode=0o444)  # Read-only
-        
-        try:
-            result = reconstructor._chunked_copy(source_file, dest_file)
-            # On some systems, this might still succeed, so we check the result
-            if not result:
-                assert not dest_file.exists()
-        finally:
-            # Clean up - make directory writable again
-            readonly_dir.chmod(0o755)
+        # This should fail because parent directories don't exist
+        result = reconstructor._chunked_copy(source_file, dest_file)
+        assert result is False  # Should fail gracefully
+        assert not dest_file.exists()
     
     def test_cleanup_resources(self, reconstructor):
         """Test resource cleanup"""

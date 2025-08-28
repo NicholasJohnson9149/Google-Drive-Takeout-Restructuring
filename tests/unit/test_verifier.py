@@ -112,15 +112,28 @@ class TestDriveVerifier:
         verifier = DriveVerifier()
         assert verifier._verify_file_hash(file1, file2) is False
     
+    @patch('app.core.verifier.DriveVerifier._calculate_file_hash')
     @patch('app.core.verifier.DriveVerifier._get_file_inventory')
-    def test_verify_reconstruction_success(self, mock_inventory, tmp_path):
+    def test_verify_reconstruction_success(self, mock_inventory, mock_hash, tmp_path):
         """Test successful reconstruction verification"""
+        # Create actual test files
+        file1 = tmp_path / "file1.txt"
+        file1.write_text("test content 1")
+        
+        dir_path = tmp_path / "dir"
+        dir_path.mkdir()
+        file2 = dir_path / "file2.txt"
+        file2.write_text("test content 2")
+        
         # Mock identical inventories
         common_inventory = {
-            "file1.txt": {"size": 100, "mtime": 123456, "path": tmp_path / "file1.txt"},
-            "dir/file2.txt": {"size": 200, "mtime": 123457, "path": tmp_path / "dir/file2.txt"}
+            "file1.txt": {"size": file1.stat().st_size, "mtime": 123456, "path": file1},
+            "dir/file2.txt": {"size": file2.stat().st_size, "mtime": 123457, "path": file2}
         }
         mock_inventory.return_value = common_inventory
+        
+        # Mock hash function to return consistent hashes
+        mock_hash.return_value = "mock_hash_value"
         
         verifier = DriveVerifier()
         results = verifier.verify_reconstruction(tmp_path, tmp_path)

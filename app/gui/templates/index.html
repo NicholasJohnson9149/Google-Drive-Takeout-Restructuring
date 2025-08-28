@@ -11,19 +11,12 @@
                 <p class="step-label">Step 1: 📁 Add path to Takeout.zip files</p>
             </div>
             
-            <div class="drop-zone" id="drop-zone">
-                <div class="drop-content">
-                    <span class="drop-icon">📁</span>
-                    <p>Drag Takeout.zip Files here</p>
-                </div>
-            </div>
-            
             <div class="file-actions">
                 <input type="text" id="folder-path" placeholder="Enter folder path or use buttons below..." 
                        style="width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid #dee2e6; border-radius: 6px; font-family: 'Poppins', sans-serif;" 
                        oninput="validatePath()">
                 <button type="button" class="btn-primary" onclick="selectTakeoutFolder()">
-                    Browse Folder...
+                    Select Takeout Folder
                 </button>
                 <div class="path-display" id="path-display">
                     <div class="path-label-header">Selected Path:</div>
@@ -88,12 +81,15 @@
                 
                 <div class="output-section">
                     <p class="step-label">Step 3:  💾 Select file export location</p>
+                    <input type="text" id="export-path" placeholder="Enter export path or use button below..." 
+                           style="width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid #dee2e6; border-radius: 6px; font-family: 'Poppins', sans-serif;" 
+                           oninput="validateExportPath()">
                     <button type="button" class="btn-primary" onclick="selectExportFolder()">
                         Select Export Folder
                     </button>
                     <div class="path-display" id="export-path-display">
-                        <div class="path-label-header">Export Path:</div>
-                        <div class="path-label">/volume/file/path/example...</div>
+                        <div class="path-label-header">Selected Export Path:</div>
+                        <div class="path-label" id="export-path-placeholder">No export path selected</div>
                     </div>
                 </div>
                 
@@ -154,7 +150,7 @@ const OPERATION_FAIL_MIN = 20;   // Hard stop operation after 20 minutes
 
 // Initialize
 document.addEventListener('DOMContentLoaded', function() {
-    setupDropZone();
+    // setupDropZone(); // Drag and drop disabled
     updateStartButton();
     setupFormInteractions();
     loadUserPaths();
@@ -192,58 +188,26 @@ async function loadUserPaths() {
 
 function updateDefaultPaths() {
     const folderPathInput = document.getElementById('folder-path');
-    const exportPathDisplay = document.querySelector('#export-path-display .path-label');
+    const exportPathInput = document.getElementById('export-path');
+    const exportPathPlaceholder = document.getElementById('export-path-placeholder');
     
     if (folderPathInput && !folderPathInput.value) {
         folderPathInput.placeholder = `e.g., ${window.userPaths.defaultSource}`;
     }
     
-    if (exportPathDisplay && exportPath === '') {
-        exportPathDisplay.textContent = window.userPaths.defaultOutput;
-        exportPath = window.userPaths.defaultOutput;
+    if (exportPathInput && !exportPathInput.value) {
+        exportPathInput.placeholder = `e.g., ${window.userPaths.defaultOutput}`;
+    }
+    
+    if (exportPathPlaceholder && exportPath === '') {
+        exportPathPlaceholder.textContent = 'No export path selected';
     }
 }
 
-// Setup drag and drop zone
+// Setup drag and drop zone - now disabled
 function setupDropZone() {
-    const dropZone = document.getElementById('drop-zone');
-    
-    if (!dropZone) return;
-    
-    dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropZone.classList.add('drag-over');
-    });
-    
-    dropZone.addEventListener('dragleave', (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('drag-over');
-    });
-    
-    dropZone.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('drag-over');
-        
-        console.log('Files dropped:', e.dataTransfer.items);
-        
-        // Extract path information from dropped items
-        const pathInfo = await extractPathFromDroppedItems(e.dataTransfer.items);
-        
-        if (pathInfo.detectedPath) {
-            console.log('Detected path from drop:', pathInfo.detectedPath);
-            
-            // Update the folder path input
-            const folderPathInput = document.getElementById('folder-path');
-            if (folderPathInput) {
-                folderPathInput.value = pathInfo.detectedPath;
-            }
-            
-            // Validate the path
-            await validatePath();
-        } else {
-            showError('Could not determine folder path from dropped items. Please use the folder selection button instead.');
-        }
-    });
+    // Drag and drop functionality has been removed
+    // Users should use the "Select Takeout Folder" button instead
 }
 
 // Enhanced path extraction from dropped items
@@ -519,7 +483,7 @@ async function selectTakeoutFolder() {
             }
         } else {
             // Fallback for browsers without File System Access API
-            showError('Please enter the folder path manually or drag files into the drop zone.');
+            showError('Please enter the folder path manually.');
             document.getElementById('folder-path').focus();
         }
     } catch (error) {
@@ -585,18 +549,30 @@ async function selectExportFolder() {
             
             console.log('Selected folder name:', folderName);
             
-            // Get suggestions for where this folder might be located
-            const suggestions = await getOutputPathSuggestions(folderName);
+            // Try to resolve the full system path
+            const resolvedPath = await tryResolveDirectoryPath(folderName, {
+                directories: [folderName],
+                hasZipFiles: false,
+                zipFiles: [],
+                hasTakeoutStructure: false
+            });
             
-            if (suggestions && suggestions.length > 0) {
-                // Show user the suggestions and let them choose
-                showOutputPathDialog(folderName, suggestions);
+            if (resolvedPath) {
+                // Use the resolved system path
+                document.getElementById('export-path').value = resolvedPath;
+                exportPath = resolvedPath;
+                await validateExportPath();
             } else {
-                // No suggestions, ask user to enter path manually
-                showManualPathDialog(folderName);
+                // Try with default user paths
+                const defaultPath = window.userPaths?.defaultOutput || '/Users/Desktop';
+                const suggestedPath = `${defaultPath}/${folderName}`;
+                document.getElementById('export-path').value = suggestedPath;
+                exportPath = suggestedPath;
+                await validateExportPath();
             }
         } else {
             showError('Please enter the export folder path manually.');
+            document.getElementById('export-path').focus();
         }
     } catch (error) {
         if (error.name !== 'AbortError') {
@@ -608,214 +584,8 @@ async function selectExportFolder() {
     }
 }
 
-// Get output path suggestions from server
-async function getOutputPathSuggestions(folderName) {
-    try {
-        const response = await fetch('/suggest-output-paths', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ folderName })
-        });
-        
-        if (response.ok) {
-            const result = await response.json();
-            return result.success ? result.suggestions : [];
-        }
-    } catch (error) {
-        console.error('Error getting path suggestions:', error);
-    }
-    return [];
-}
-
-// Show dialog with suggested output paths
-function showOutputPathDialog(folderName, suggestions) {
-    const dialog = document.createElement('div');
-    dialog.className = 'output-path-dialog';
-    dialog.innerHTML = `
-        <div class="dialog-overlay"></div>
-        <div class="dialog-content">
-            <h3>Select Output Location</h3>
-            <p>You selected the folder "<strong>${folderName}</strong>". Where would you like to create or use this folder?</p>
-            <div class="path-suggestions">
-                ${suggestions.map((suggestion, i) => `
-                    <label class="path-suggestion">
-                        <input type="radio" name="output-path-choice" value="${suggestion.path}" ${i === 0 ? 'checked' : ''}>
-                        <div class="suggestion-details">
-                            <div class="suggestion-path">${suggestion.path}</div>
-                            <div class="suggestion-status">
-                                ${suggestion.exists ? 
-                                    '<span class="status-exists">✅ Folder exists</span>' : 
-                                    suggestion.can_create ? 
-                                        '<span class="status-can-create">📁 Will be created</span>' :
-                                        '<span class="status-cannot-create">❌ Cannot create here</span>'
-                                }
-                            </div>
-                        </div>
-                    </label>
-                `).join('')}
-                <label class="path-suggestion">
-                    <input type="radio" name="output-path-choice" value="manual">
-                    <div class="suggestion-details">
-                        <div class="suggestion-path">Enter custom path...</div>
-                        <div class="suggestion-status">
-                            <span class="status-manual">✏️ Manual entry</span>
-                        </div>
-                    </div>
-                </label>
-            </div>
-            <div class="dialog-actions">
-                <button type="button" onclick="confirmOutputPath('${folderName}')" class="btn-primary">Use Selected Path</button>
-                <button type="button" onclick="cancelOutputPathDialog()" class="btn">Cancel</button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(dialog);
-}
-
-// Show manual path entry dialog
-function showManualPathDialog(folderName) {
-    const currentDefault = window.userPaths?.defaultOutput || '/Users/Desktop';
-    const suggestedPath = `${currentDefault}/${folderName}`;
-    
-    const dialog = document.createElement('div');
-    dialog.className = 'output-path-dialog';
-    dialog.innerHTML = `
-        <div class="dialog-overlay"></div>
-        <div class="dialog-content">
-            <h3>Enter Output Path</h3>
-            <p>Enter the full path where you want to create or use the folder "<strong>${folderName}</strong>":</p>
-            <div class="manual-path-input">
-                <input type="text" id="manual-output-path" value="${suggestedPath}" 
-                       placeholder="Enter full path..." style="width: 100%; padding: 10px; margin: 10px 0;">
-                <div class="path-help">
-                    <small>Example: /Volumes/Creator Pro/gDrive-test-output</small>
-                </div>
-            </div>
-            <div class="dialog-actions">
-                <button type="button" onclick="confirmManualOutputPath()" class="btn-primary">Use This Path</button>
-                <button type="button" onclick="cancelOutputPathDialog()" class="btn">Cancel</button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(dialog);
-    
-    // Focus the input and select the folder name for easy editing
-    setTimeout(() => {
-        const input = document.getElementById('manual-output-path');
-        input.focus();
-        input.select();
-    }, 100);
-}
-
-// Confirm selected output path
-async function confirmOutputPath(folderName) {
-    const selected = document.querySelector('input[name="output-path-choice"]:checked');
-    if (!selected) return;
-    
-    if (selected.value === 'manual') {
-        // Switch to manual entry
-        cancelOutputPathDialog();
-        showManualPathDialog(folderName);
-        return;
-    }
-    
-    const selectedPath = selected.value;
-    
-    // Validate and potentially create the path
-    try {
-        const response = await fetch('/validate-and-create-path', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                path: selectedPath, 
-                create: true, 
-                type: 'directory' 
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            exportPath = result.path;
-            document.querySelector('#export-path-display .path-label').textContent = exportPath;
-            updateStartButton();
-            cancelOutputPathDialog();
-            
-            if (result.created) {
-                showSuccessMessage(`Created output folder: ${exportPath}`);
-            } else {
-                showSuccessMessage(`Using existing folder: ${exportPath}`);
-            }
-        } else {
-            showError(`Path validation failed: ${result.error}`);
-        }
-    } catch (error) {
-        console.error('Error validating path:', error);
-        showError('Failed to validate output path.');
-    }
-}
-
-// Confirm manual output path
-async function confirmManualOutputPath() {
-    const input = document.getElementById('manual-output-path');
-    if (!input) return;
-    
-    const manualPath = input.value.trim();
-    if (!manualPath) {
-        showError('Please enter a path.');
-        return;
-    }
-    
-    // Validate and potentially create the path
-    try {
-        const response = await fetch('/validate-and-create-path', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                path: manualPath, 
-                create: true, 
-                type: 'directory' 
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            exportPath = result.path;
-            document.querySelector('#export-path-display .path-label').textContent = exportPath;
-            updateStartButton();
-            cancelOutputPathDialog();
-            
-            if (result.created) {
-                showSuccessMessage(`Created output folder: ${exportPath}`);
-            } else {
-                showSuccessMessage(`Using existing folder: ${exportPath}`);
-            }
-        } else {
-            showError(`Path validation failed: ${result.error}`);
-            
-            // If the path can be created, offer to create it
-            if (result.can_create && !result.exists) {
-                if (confirm(`The folder doesn't exist but can be created at:\n${result.path}\n\nCreate it now?`)) {
-                    confirmManualOutputPath(); // Try again, which will create it
-                }
-            }
-        }
-    } catch (error) {
-        console.error('Error validating manual path:', error);
-        showError('Failed to validate output path.');
-    }
-}
-
-// Cancel output path dialog
-function cancelOutputPathDialog() {
-    const dialog = document.querySelector('.output-path-dialog');
-    if (dialog) {
-        dialog.remove();
-    }
-}
+// Removed popup dialog functions - no longer needed
+// Export path is now handled directly with input field and validation
 
 // Show success message
 function showSuccessMessage(message) {
@@ -887,6 +657,59 @@ async function validatePath() {
         fileList.style.display = 'none';
         sourcePath = '';
         foundZips = [];
+    }
+    
+    updateStartButton();
+}
+
+// Validate export path
+async function validateExportPath() {
+    const exportPathInput = document.getElementById('export-path').value.trim();
+    const pathDisplay = document.getElementById('export-path-display');
+    const pathPlaceholder = document.getElementById('export-path-placeholder');
+    
+    if (!exportPathInput) {
+        pathPlaceholder.textContent = 'No export path selected';
+        pathDisplay.className = 'path-display';
+        exportPath = '';
+        updateStartButton();
+        return;
+    }
+    
+    try {
+        pathPlaceholder.textContent = 'Validating...';
+        
+        // Validate and potentially create the path
+        const response = await fetch('/validate-and-create-path', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                path: exportPathInput, 
+                create: true, 
+                type: 'directory' 
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            exportPath = result.path;
+            pathPlaceholder.textContent = exportPath;
+            pathDisplay.className = 'path-display success';
+            
+            if (result.created) {
+                console.log(`Created output folder: ${exportPath}`);
+            }
+        } else {
+            pathPlaceholder.textContent = result.error || 'Invalid path';
+            pathDisplay.className = 'path-display error';
+            exportPath = '';
+        }
+    } catch (error) {
+        console.error('Error validating export path:', error);
+        pathPlaceholder.textContent = 'Error validating path';
+        pathDisplay.className = 'path-display error';
+        exportPath = '';
     }
     
     updateStartButton();
@@ -985,15 +808,19 @@ function updateStartButton() {
 
 // Setup form interactions
 function setupFormInteractions() {
-    // Export path input
-    const exportPathInput = document.querySelector('#export-path-display .path-label');
+    // Export path input validation on Enter key
+    const exportPathInput = document.getElementById('export-path');
     if (exportPathInput) {
-        exportPathInput.addEventListener('click', () => {
-            const newPath = prompt('Enter export path:', exportPath || window.userPaths?.defaultOutput || '');
-            if (newPath && newPath.trim()) {
-                exportPath = newPath.trim();
-                exportPathInput.textContent = exportPath;
-                updateStartButton();
+        exportPathInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                validateExportPath();
+            }
+        });
+        
+        // Also validate on blur (when user clicks away)
+        exportPathInput.addEventListener('blur', () => {
+            if (exportPathInput.value.trim()) {
+                validateExportPath();
             }
         });
     }
@@ -1052,7 +879,8 @@ async function checkForRecovery() {
                 }
                 if (localRecovery.exportPath) {
                     exportPath = localRecovery.exportPath;
-                    document.querySelector('#export-path-display .path-label').textContent = exportPath;
+                    document.getElementById('export-path').value = exportPath;
+                    document.getElementById('export-path-placeholder').textContent = exportPath;
                 }
             }
         }
@@ -1552,10 +1380,9 @@ function startOver() {
     document.getElementById('file-list').style.display = 'none';
     
     // Reset export path
-    if (window.userPaths) {
-        exportPath = window.userPaths.defaultOutput;
-        document.querySelector('#export-path-display .path-label').textContent = exportPath;
-    }
+    document.getElementById('export-path').value = '';
+    document.getElementById('export-path-placeholder').textContent = 'No export path selected';
+    exportPath = '';
     
     // Clear saved state
     localStorage.removeItem('takeout_consolidator_state');

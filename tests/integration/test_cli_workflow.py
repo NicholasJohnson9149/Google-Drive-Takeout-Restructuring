@@ -97,7 +97,7 @@ class TestCLIWorkflow:
             # Step 4: Verify reconstruction
             with patch('sys.argv', [
                 'cli.py', 'verify',
-                str(extract_dir),
+                str(extract_dir / "Takeout"),  # Verify against the actual Takeout directory
                 str(output_dir)
             ]):
                 result = main()
@@ -198,8 +198,9 @@ class TestCLIWorkflow:
     def test_cli_invalid_command(self):
         """Test CLI with invalid command"""
         with patch('sys.argv', ['cli.py', 'invalid_command']):
-            result = main()
-            assert result == 1
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 2
     
     def test_cli_no_command(self):
         """Test CLI with no command"""

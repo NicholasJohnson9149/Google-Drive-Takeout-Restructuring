@@ -47,10 +47,10 @@ class DriveVerifier:
         try:
             # Get file inventories
             self.logger.progress(10, operation="Scanning original files")
-            original_files = self._get_file_inventory(original_path)
+            original_files = self._get_file_inventory(original_path, normalize_paths=True)
             
             self.logger.progress(30, operation="Scanning reconstructed files")
-            reconstructed_files = self._get_file_inventory(reconstructed_path)
+            reconstructed_files = self._get_file_inventory(reconstructed_path, normalize_paths=False)
             
             results['total_original_files'] = len(original_files)
             results['total_reconstructed_files'] = len(reconstructed_files)
@@ -99,8 +99,8 @@ class DriveVerifier:
                 # For important files, verify content hash
                 if self._should_verify_hash(relative_path):
                     if not self._verify_file_hash(
-                        original_path / relative_path,
-                        reconstructed_path / relative_path
+                        original_info['path'],  # Use actual file path from inventory
+                        reconstructed_info['path']  # Use actual file path from inventory
                     ):
                         results['hash_mismatches'].append(relative_path)
                         continue
@@ -140,7 +140,18 @@ class DriveVerifier:
         self.verification_results = results
         return results
     
-    def _get_file_inventory(self, base_path: Path) -> Dict[str, Dict]:
+    def _normalize_takeout_path(self, path_str: str) -> str:
+        """
+        Normalize Takeout path by removing Drive/ prefix
+        e.g., 'Drive/document.txt' -> 'document.txt'
+        """
+        path = Path(path_str)
+        if path.parts and path.parts[0] == 'Drive':
+            # Remove the 'Drive' prefix
+            return str(Path(*path.parts[1:]))
+        return path_str
+    
+    def _get_file_inventory(self, base_path: Path, normalize_paths: bool = False) -> Dict[str, Dict]:
         """Get inventory of all files in a directory tree"""
         inventory = {}
         
@@ -151,9 +162,15 @@ class DriveVerifier:
             if file_path.is_file():
                 try:
                     relative_path = file_path.relative_to(base_path)
+                    path_key = str(relative_path)
+                    
+                    # Normalize Takeout paths if requested
+                    if normalize_paths:
+                        path_key = self._normalize_takeout_path(path_key)
+                    
                     stat = file_path.stat()
                     
-                    inventory[str(relative_path)] = {
+                    inventory[path_key] = {
                         'size': stat.st_size,
                         'mtime': stat.st_mtime,
                         'path': file_path
