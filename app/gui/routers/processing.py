@@ -46,6 +46,7 @@ async def start_processing(request: Request):
                 'total_files': 0,
                 'copied_files': 0,
                 'skipped_duplicates': 0,
+                'renamed_duplicates': 0,
                 'errors': 0
             }
         }
@@ -90,6 +91,10 @@ async def start_processing(request: Request):
                                     op['stats']['copied_files'] = stats['value']
                                 elif 'skipped' in desc:
                                     op['stats']['skipped_duplicates'] = stats['value']
+                                elif 'renamed' in desc:
+                                    if 'renamed_duplicates' not in op['stats']:
+                                        op['stats']['renamed_duplicates'] = 0
+                                    op['stats']['renamed_duplicates'] = stats['value']
                                 elif 'error' in desc:
                                     op['stats']['errors'] = stats['value']
                     
@@ -103,6 +108,7 @@ async def start_processing(request: Request):
                 options = {
                     'dry_run': data.get('dry_run', False),
                     'verify': data.get('verify_files', False),
+                    'conflict_resolution': data.get('conflict_resolution', 'rename'),
                     'force': True,  # Skip confirmation in GUI mode
                     'verbose': True  # Always verbose for progress tracking
                 }

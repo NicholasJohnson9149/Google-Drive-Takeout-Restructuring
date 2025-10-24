@@ -18,6 +18,8 @@ Reconstruct your original Google Drive folder structure from Google Takeout arch
 
 ## 🚀 Quick Start
 
+![alt text](<docs/imgs/01 Google Drive Tackout Restructuring - App.png>)
+
 ### Option 1: Web GUI (Easiest)
 
 ```bash

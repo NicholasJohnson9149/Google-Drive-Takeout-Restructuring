@@ -118,6 +118,7 @@ def handle_rebuild(args: argparse.Namespace) -> int:
             export_path=args.output,
             dry_run=args.dry_run,
             duplicate_strategy=duplicate_strategy,
+            conflict_resolution=args.conflict_resolution,
             progress_callback=update_progress
         )
         
@@ -135,6 +136,7 @@ def handle_rebuild(args: argparse.Namespace) -> int:
             console.print(f"  Total files processed: {stats.total_files}")
             console.print(f"  Files copied: {stats.copied_files}")
             console.print(f"  Duplicates skipped: {stats.skipped_duplicates}")
+            console.print(f"  Duplicates renamed: {stats.renamed_duplicates}")
             console.print(f"  Metadata skipped: {stats.skipped_metadata}")
             console.print(f"  Errors: {stats.errors}")
             console.print(f"  Total size: {stats.total_size / (1024**3):.2f} GB")
@@ -255,6 +257,8 @@ Examples:
                                 help='Skip confirmation prompt')
     rebuild_parser.add_argument('--verify', action='store_true',
                                 help='Verify file copies (slower but safer)')
+    rebuild_parser.add_argument('--conflict-resolution', choices=['skip', 'rename'], default='rename',
+                                help='How to handle duplicate files (default: rename)')
     
     # Verify command
     verify_parser = subparsers.add_parser('verify',

@@ -1,6 +1,6 @@
 /* Google Drive Takeout Restructuring - Exact UI Match */
 
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400;500;600;700&display=swap');
 
 * {
     margin: 0;
@@ -9,7 +9,7 @@
 }
 
 body {
-    font-family: 'Poppins', sans-serif;
+    font-family: 'Roboto Mono', monospace;
     background: #f8f9fa;
     color: #1a1a1a;
     line-height: 1.6;
@@ -103,7 +103,7 @@ body {
     border: none;
     padding: 16px 32px;
     border-radius: 8px;
-    font-family: 'Poppins', sans-serif;
+    font-family: 'Roboto Mono', monospace;
     font-size: 1rem;
     font-weight: 500;
     cursor: pointer;
@@ -122,7 +122,7 @@ body {
     border: none;
     padding: 16px 32px;
     border-radius: 8px;
-    font-family: 'Poppins', sans-serif;
+    font-family: 'Roboto Mono', monospace;
     font-size: 1rem;
     font-weight: 500;
     cursor: pointer;
@@ -159,7 +159,7 @@ body {
 }
 
 .path-label {
-    font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
+    font-family: 'Roboto Mono', monospace;
     font-size: 0.85rem;
     color: #007bff;
     line-height: 1.4;
@@ -444,7 +444,7 @@ body {
     border-radius: 8px;
     background: white;
     color: #1a1a1a;
-    font-family: 'Poppins', sans-serif;
+    font-family: 'Roboto Mono', monospace;
     font-size: 0.9rem;
     font-weight: 500;
     cursor: pointer;
@@ -474,7 +474,7 @@ body {
     justify-content: space-between;
     gap: 12px;
     z-index: 1000;
-    font-family: 'Poppins', sans-serif;
+    font-family: 'Roboto Mono', monospace;
     font-size: 0.9rem;
     max-width: 400px;
 }
@@ -627,7 +627,7 @@ body {
 }
 
 .suggestion-path {
-    font-family: 'Courier New', monospace;
+    font-family: 'Roboto Mono', monospace;
     font-size: 0.9rem;
     margin-bottom: 4px;
     word-break: break-all;
@@ -658,7 +658,7 @@ body {
 }
 
 .manual-path-input input {
-    font-family: 'Courier New', monospace;
+    font-family: 'Roboto Mono', monospace;
     font-size: 0.9rem;
     border: 2px solid #dee2e6;
     border-radius: 6px;
@@ -686,4 +686,201 @@ body {
     margin-top: 24px;
     padding-top: 20px;
     border-top: 1px solid #e9ecef;
+}
+
+/* Completion Screen Styles - Exact Design Match */
+.completion-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 40px 20px;
+}
+
+.completion-header {
+    text-align: left;
+    margin-bottom: 30px;
+}
+
+.completion-title {
+    font-size: 2.2rem;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.completion-title .success-icon {
+    font-size: 2.2rem;
+    flex-shrink: 0;
+}
+
+/* Success Message Box */
+.success-message-box {
+    background: #c8e6c9;
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 30px;
+    max-width: 900px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* Error Message Box (when there are errors) */
+.success-message-box.has-errors {
+    background: #ffcdd2;
+}
+
+.success-header-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.folder-icon {
+    font-size: 1.3rem;
+}
+
+.success-text {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #2e7d32;
+}
+
+.success-message-box.has-errors .success-text {
+    color: #c62828;
+}
+
+.success-details {
+    margin-bottom: 16px;
+}
+
+.detail-row {
+    margin: 8px 0;
+    font-size: 0.95rem;
+}
+
+.detail-label {
+    font-weight: 600;
+    color: #1a1a1a;
+    margin-right: 6px;
+}
+
+.detail-value {
+    color: #1a1a1a;
+    font-family: 'Roboto Mono', monospace;
+}
+
+.success-footer {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(26, 26, 26, 0.15);
+    color: #2e7d32;
+    font-size: 0.9rem;
+}
+
+.success-message-box.has-errors .success-footer {
+    color: #c62828;
+}
+
+.footer-icon {
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+
+/* Statistics Grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    margin-bottom: 40px;
+    max-width: 900px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.stat-card {
+    background: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 28px 20px;
+    text-align: center;
+}
+
+.stat-number {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: #1a1a1a;
+    margin-bottom: 8px;
+    line-height: 1.1;
+}
+
+.stat-label {
+    font-size: 0.95rem;
+    color: #666;
+    font-weight: 400;
+}
+
+/* Completion Actions */
+.completion-actions {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.completion-actions .btn-outline {
+    background: white;
+    color: #333;
+    border: 1px solid #ccc;
+    padding: 12px 24px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 140px;
+}
+
+.completion-actions .btn-outline:hover {
+    background: #f8f9fa;
+    border-color: #999;
+}
+
+.completion-actions .btn-primary-action {
+    background: #4285f4;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 160px;
+}
+
+.completion-actions .btn-primary-action:hover {
+    background: #357ae8;
+    box-shadow: 0 2px 8px rgba(66, 133, 244, 0.3);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .completion-actions {
+        flex-direction: column;
+    }
+    
+    .completion-actions button {
+        width: 100%;
+    }
 }

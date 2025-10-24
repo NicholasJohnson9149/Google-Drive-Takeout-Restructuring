@@ -58,6 +58,9 @@ class CLIExecutor:
         if options.get('verify', False):
             cmd.append("--verify")
         
+        if 'conflict_resolution' in options:
+            cmd.extend(['--conflict-resolution', options['conflict_resolution']])
+        
         return cmd
     
     def build_verify_command(self, source_path: str, dest_path: str, verbose: bool = True) -> List[str]:

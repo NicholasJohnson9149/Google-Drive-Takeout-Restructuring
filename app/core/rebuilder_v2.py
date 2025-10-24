@@ -25,6 +25,7 @@ class ProcessingStats:
     total_files: int = 0
     copied_files: int = 0
     skipped_duplicates: int = 0
+    renamed_duplicates: int = 0
     skipped_metadata: int = 0
     errors: int = 0
     total_size: int = 0
@@ -54,12 +55,14 @@ class SafeTakeoutReconstructor:
                  export_path: str, 
                  dry_run: bool = True,
                  duplicate_strategy: DuplicateStrategy = DuplicateStrategy.HASH,
+                 conflict_resolution: str = "rename",
                  progress_callback: Optional[Callable] = None):
         
         # Core paths
         self.source_dir = Path(takeout_path)
         self.dest_dir = Path(export_path)
         self.dry_run = dry_run
+        self.conflict_resolution = conflict_resolution  # "skip" or "rename"
         self.progress_callback = progress_callback
         
         # Initialize components
@@ -179,7 +182,76 @@ class SafeTakeoutReconstructor:
             self._record_error("validation", f"Source path is not a directory: {self.source_dir}", "ValidationError")
             return False
         
+        # Check system resources
+        if not self._check_system_resources():
+            return False
+        
         return True
+    
+    def _check_system_resources(self) -> bool:
+        """Check available system resources before starting"""
+        try:
+            # Try to import psutil for better resource checking
+            try:
+                import psutil
+                PSUTIL_AVAILABLE = True
+            except ImportError:
+                PSUTIL_AVAILABLE = False
+                self.logger.info("psutil not available, skipping detailed resource checks")
+            
+            # Check disk space
+            try:
+                import shutil as shutil_disk
+                # Get stats for the destination's parent if dest doesn't exist yet
+                check_path = self.dest_dir if self.dest_dir.exists() else self.dest_dir.parent
+                if not check_path.exists():
+                    check_path = Path.home()
+                
+                dest_stats = shutil_disk.disk_usage(str(check_path))
+                free_gb = dest_stats.free / (1024**3)
+                
+                self.logger.info(f"Available disk space: {free_gb:.2f} GB")
+                
+                if free_gb < 1:  # Less than 1GB free
+                    self._record_error("resources", f"Insufficient disk space: only {free_gb:.2f} GB available", "ResourceError")
+                    return False
+                elif free_gb < 50:  # Warning if less than 50GB free
+                    self.logger.warning(f"Low disk space warning: only {free_gb:.2f} GB available")
+                    if self.progress_callback:
+                        self.progress_callback({
+                            'type': 'warning',
+                            'message': f'Low disk space: {free_gb:.2f} GB available'
+                        })
+            except Exception as e:
+                self.logger.warning(f"Could not check disk space: {e}")
+            
+            # Check memory if psutil is available
+            if PSUTIL_AVAILABLE:
+                import psutil
+                memory = psutil.virtual_memory()
+                memory_available_gb = memory.available / (1024**3)
+                memory_percent = memory.percent
+                
+                self.logger.info(f"Memory usage: {memory_percent:.1f}% (Available: {memory_available_gb:.2f} GB)")
+                
+                if memory_percent > 95:
+                    self.logger.warning("High memory usage detected")
+                    if self.progress_callback:
+                        self.progress_callback({
+                            'type': 'warning',
+                            'message': f'High memory usage: {memory_percent:.1f}%'
+                        })
+                
+                # Log CPU usage as well
+                cpu_percent = psutil.cpu_percent(interval=1)
+                self.logger.info(f"CPU usage: {cpu_percent:.1f}%")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.warning(f"Error checking system resources: {e}")
+            # Don't fail if we can't check resources, just warn
+            return True
     
     def _process_files(self, files: List[FileInfo], verify_copies: bool = False) -> bool:
         """Process all files from the scan"""
@@ -203,6 +275,10 @@ class SafeTakeoutReconstructor:
                 # Update stats based on result
                 if result == "copied":
                     self.stats.copied_files += 1
+                    self.stats.copied_size += file_info.size
+                elif result == "renamed_duplicate":
+                    self.stats.renamed_duplicates += 1
+                    self.stats.copied_files += 1  # Still counted as copied
                     self.stats.copied_size += file_info.size
                 elif result == "skipped_duplicate":
                     self.stats.skipped_duplicates += 1
@@ -246,22 +322,60 @@ class SafeTakeoutReconstructor:
         dest_path = transformation.clean_path
         self.logger.debug(transformation.transformation_log)
         
-        # Check for duplicates
-        duplicate_result = self.duplicate_checker.is_duplicate(file_info.path, dest_path)
-        if duplicate_result.is_duplicate:
-            self.logger.info(f"Skipped duplicate: {file_info.path.name} ({duplicate_result.reason})")
-            return "skipped_duplicate"
+        # Check for duplicates and handle based on conflict resolution setting
+        was_renamed = False
+        if dest_path.exists():
+            duplicate_result = self.duplicate_checker.is_duplicate(file_info.path, dest_path)
+            if duplicate_result.is_duplicate:
+                if self.conflict_resolution == "skip":
+                    self.logger.info(f"Skipped duplicate: {file_info.path.name} ({duplicate_result.reason})")
+                    return "skipped_duplicate"
+                elif self.conflict_resolution == "rename":
+                    # Generate a unique filename with suffix
+                    dest_path = self._generate_unique_filename(dest_path)
+                    self.logger.info(f"Renamed duplicate: {file_info.path.name} -> {dest_path.name}")
+                    was_renamed = True
+                    # Continue with copying to the new path
         
         # Copy the file
         if not self.dry_run:
             success = self._copy_file(file_info.path, dest_path, verify_copies)
             if success:
-                return "copied"
+                return "renamed_duplicate" if was_renamed else "copied"
             else:
                 return "error"
         else:
             self.logger.info(f"Would copy: {file_info.path} -> {dest_path}")
-            return "copied"
+            return "renamed_duplicate" if was_renamed else "copied"
+    
+    def _generate_unique_filename(self, original_path: Path) -> Path:
+        """Generate a unique filename by adding a suffix"""
+        if not original_path.exists():
+            return original_path
+        
+        # Extract name and suffix
+        name = original_path.stem
+        suffix = original_path.suffix
+        parent = original_path.parent
+        
+        counter = 1
+        while True:
+            # Create new filename with counter
+            new_name = f"{name}_{counter}{suffix}"
+            new_path = parent / new_name
+            
+            if not new_path.exists():
+                return new_path
+            
+            counter += 1
+            
+            # Safety check to prevent infinite loop
+            if counter > 1000:
+                # Use timestamp as fallback
+                import time
+                timestamp = int(time.time())
+                new_name = f"{name}_{timestamp}{suffix}"
+                return parent / new_name
     
     def _copy_file(self, source_path: Path, dest_path: Path, verify: bool = False) -> bool:
         """

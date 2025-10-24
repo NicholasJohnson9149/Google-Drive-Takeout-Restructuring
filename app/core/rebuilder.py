@@ -21,13 +21,15 @@ class SafeTakeoutReconstructor:
     """Safely reconstructs Google Drive structure from Takeout data"""
     
     def __init__(self, takeout_path: str, export_path: str, dry_run: bool = True, 
-                 progress_callback: Optional[Callable] = None, gui_mode: bool = False):
+                 progress_callback: Optional[Callable] = None, gui_mode: bool = False,
+                 conflict_resolution: str = "rename"):
         # Initialize paths
         self.source_dir = Path(takeout_path)
         self.dest_dir = Path(export_path)
         self.dry_run = dry_run
         self.progress_callback = progress_callback
         self.gui_mode = gui_mode
+        self.conflict_resolution = conflict_resolution  # "skip" or "rename"
         
         # Initialize logger
         self.logger = ProgressLogger("rebuilder")
@@ -168,11 +170,18 @@ class SafeTakeoutReconstructor:
         if not dest_path:
             return
         
-        # Check for duplicates
-        if self._is_duplicate(source_path, dest_path):
-            self.stats['skipped_duplicates'] += 1
-            self.logger.info(f"Skipped duplicate: {source_path.name}")
-            return
+        # Handle duplicates based on user setting
+        if dest_path.exists():
+            if self._is_duplicate(source_path, dest_path):
+                if self.conflict_resolution == "skip":
+                    self.stats['skipped_duplicates'] += 1
+                    self.logger.info(f"Skipped duplicate: {source_path.name}")
+                    return
+                elif self.conflict_resolution == "rename":
+                    # Generate a new name with suffix
+                    dest_path = self._generate_unique_filename(dest_path)
+                    self.stats['renamed_duplicates'] += 1
+                    self.logger.info(f"Renamed duplicate: {source_path.name} -> {dest_path.name}")
         
         # Copy the file
         if not self.dry_run:
@@ -194,22 +203,41 @@ class SafeTakeoutReconstructor:
         if source_path.name.endswith('.json') and self._is_google_metadata(source_path):
             return None  # Skip metadata files
         
-        # Clean up the path (remove Takeout folder structure)
+        # Clean up the path (remove Takeout folder structure but preserve Drive contents)
         path_parts = list(relative_path.parts)
         original_parts = path_parts.copy()  # For debugging
         
-        # More aggressive removal of Takeout and Drive structures
+        # Remove Takeout wrapper folders while preserving Drive folder structure
         cleaned_parts = []
-        for part in path_parts:
+        skip_until_drive = False
+        
+        for i, part in enumerate(path_parts):
             # Skip any folder that starts with "Takeout" (handles Takeout, Takeout 1, etc.)
             if part.startswith('Takeout'):
+                skip_until_drive = True
                 continue
-            # Skip "Drive" folders entirely - we want files to go directly to output
-            elif part == 'Drive':
-                continue
-            # Keep everything else
-            else:
+                
+            # When we encounter "Drive", we start preserving the structure from the next part
+            elif part == 'Drive' and skip_until_drive:
+                skip_until_drive = False
+                continue  # Skip the "Drive" folder itself, but preserve its contents
+                
+            # After finding Drive, preserve all remaining parts (the actual folder structure)
+            elif not skip_until_drive:
                 cleaned_parts.append(part)
+        
+        # Handle edge case: if no Drive folder found, preserve structure after Takeout
+        if not cleaned_parts and any(part.startswith('Takeout') for part in path_parts):
+            # Find the first Takeout folder and take everything after it
+            takeout_index = None
+            for i, part in enumerate(path_parts):
+                if part.startswith('Takeout'):
+                    takeout_index = i
+                    break
+            
+            if takeout_index is not None and takeout_index + 1 < len(path_parts):
+                # Take all parts after the Takeout folder
+                cleaned_parts = path_parts[takeout_index + 1:]
         
         # Debug logging for path transformation
         if self.logger and len(original_parts) != len(cleaned_parts):
@@ -219,7 +247,7 @@ class SafeTakeoutReconstructor:
             self.logger.warning(f"No valid path parts remaining for: {source_path}")
             return None
         
-        # Reconstruct clean path - files go directly into dest_dir without Drive/ nesting
+        # Reconstruct clean path preserving the original Drive folder structure
         clean_relative_path = Path(*cleaned_parts)
         final_path = self.dest_dir / clean_relative_path
         
@@ -228,6 +256,35 @@ class SafeTakeoutReconstructor:
             self.logger.debug(f"Final destination: {source_path} → {final_path}")
         
         return final_path
+    
+    def _generate_unique_filename(self, original_path: Path) -> Path:
+        """Generate a unique filename by adding a suffix"""
+        if not original_path.exists():
+            return original_path
+        
+        # Extract name and suffix
+        name = original_path.stem
+        suffix = original_path.suffix
+        parent = original_path.parent
+        
+        counter = 1
+        while True:
+            # Create new filename with counter
+            new_name = f"{name}_{counter}{suffix}"
+            new_path = parent / new_name
+            
+            if not new_path.exists():
+                return new_path
+            
+            counter += 1
+            
+            # Safety check to prevent infinite loop
+            if counter > 1000:
+                # Use timestamp as fallback
+                import time
+                timestamp = int(time.time())
+                new_name = f"{name}_{timestamp}{suffix}"
+                return parent / new_name
     
     def _is_google_metadata(self, file_path: Path) -> bool:
         """Check if a file is Google metadata"""

@@ -35,6 +35,7 @@ class FileScanner:
         self.source_dir = Path(source_dir)
         self.progress_callback = progress_callback
         self.logger = logging.getLogger(__name__)
+        self.takeout_folders = []  # Will store detected Takeout folder paths
     
     def scan(self) -> ScanResult:
         """
@@ -54,6 +55,9 @@ class FileScanner:
         if not self.source_dir.is_dir():
             errors.append(f"Source path is not a directory: {self.source_dir}")
             return ScanResult(files=[], total_files=0, total_size=0, errors=errors)
+        
+        # First, detect Takeout folders (like the working terminal version)
+        self._detect_takeout_folders()
         
         # Walk directory tree
         for file_info in self._walk_directory():
@@ -130,3 +134,41 @@ class FileScanner:
                 return any(key in data for key in ['title', 'createdTime', 'modifiedTime', 'mimeType'])
         except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             return False
+    
+    def _detect_takeout_folders(self):
+        """Detect Takeout folder structures in the source directory"""
+        import re
+        takeout_pattern = re.compile(r'^Takeout[\s\-_]?\d*$', re.IGNORECASE)
+        
+        # Look for Takeout*/Drive folders
+        takeout_drive_folders = list(self.source_dir.glob("Takeout*/Drive"))
+        takeout_drive_folders.extend(list(self.source_dir.glob("Takeout-*/Drive")))
+        takeout_drive_folders.extend(list(self.source_dir.glob("Takeout */Drive")))
+        takeout_drive_folders.extend(list(self.source_dir.glob("Takeout_*/Drive")))
+        
+        # Also look for plain Takeout folders without Drive
+        takeout_folders_only = list(self.source_dir.glob("Takeout*"))
+        
+        # Combine and deduplicate
+        all_folders = set()
+        for folder in takeout_drive_folders:
+            all_folders.add(folder)
+            self.logger.info(f"Found Takeout/Drive folder: {folder}")
+        
+        for folder in takeout_folders_only:
+            if folder.is_dir() and takeout_pattern.match(folder.name):
+                # Check if it has a Drive subfolder
+                drive_path = folder / "Drive"
+                if drive_path.exists():
+                    all_folders.add(drive_path)
+                    self.logger.info(f"Found Takeout with Drive: {drive_path}")
+                else:
+                    all_folders.add(folder)
+                    self.logger.info(f"Found Takeout folder (no Drive): {folder}")
+        
+        self.takeout_folders = sorted(list(all_folders))
+        
+        if self.takeout_folders:
+            self.logger.info(f"Detected {len(self.takeout_folders)} Takeout folder(s) to process")
+        else:
+            self.logger.warning("No Takeout folders detected, will scan entire source directory")

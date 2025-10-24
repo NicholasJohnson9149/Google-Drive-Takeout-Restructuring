@@ -13,7 +13,7 @@
             
             <div class="file-actions">
                 <input type="text" id="folder-path" placeholder="Enter folder path or use buttons below..." 
-                       style="width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid #dee2e6; border-radius: 6px; font-family: 'Poppins', sans-serif;" 
+                       style="width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid #dee2e6; border-radius: 6px; font-family: 'Roboto Mono', monospace;" 
                        oninput="validatePath()">
                 <button type="button" class="btn-primary" onclick="selectTakeoutFolder()">
                     Select Takeout Folder
@@ -82,7 +82,7 @@
                 <div class="output-section">
                     <p class="step-label">Step 3:  💾 Select file export location</p>
                     <input type="text" id="export-path" placeholder="Enter export path or use button below..." 
-                           style="width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid #dee2e6; border-radius: 6px; font-family: 'Poppins', sans-serif;" 
+                           style="width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid #dee2e6; border-radius: 6px; font-family: 'Roboto Mono', monospace;" 
                            oninput="validateExportPath()">
                     <button type="button" class="btn-primary" onclick="selectExportFolder()">
                         Select Export Folder
@@ -1255,42 +1255,96 @@ async function cancelOperation() {
 
 // Display completion results
 function displayCompletionResults(operation) {
-    const completionSummary = document.getElementById('completion-summary');
-    
     const stats = operation.stats || {};
-    const duration = operation.end_time && operation.start_time 
-        ? ((new Date(operation.end_time) - new Date(operation.start_time)) / 1000 / 60).toFixed(1)
-        : 'Unknown';
+    const hasErrors = stats.errors > 0;
     
-    completionSummary.innerHTML = `
-        <div class="completion-stats">
-            <div class="stat-row">
-                <span class="stat-label">Total Files:</span>
-                <span class="stat-value">${stats.total_files || 0}</span>
-            </div>
-            <div class="stat-row">
-                <span class="stat-label">Files Copied:</span>
-                <span class="stat-value">${stats.copied_files || 0}</span>
-            </div>
-            <div class="stat-row">
-                <span class="stat-label">Skipped (Duplicates):</span>
-                <span class="stat-value">${stats.skipped_duplicates || 0}</span>
-            </div>
-            <div class="stat-row">
-                <span class="stat-label">Errors:</span>
-                <span class="stat-value">${stats.errors || 0}</span>
-            </div>
-            <div class="stat-row">
-                <span class="stat-label">Duration:</span>
-                <span class="stat-value">${duration} minutes</span>
-            </div>
-        </div>
+    // Calculate duration
+    let durationStr = 'Unknown';
+    if (operation.end_time && operation.start_time) {
+        const durationMs = new Date(operation.end_time) - new Date(operation.start_time);
+        const hours = Math.floor(durationMs / (1000 * 60 * 60));
+        const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((durationMs % (1000 * 60)) / 1000);
         
-        <div class="completion-message">
-            <p>✅ Your Google Drive structure has been successfully reconstructed!</p>
-            <p>Files have been organized in: <strong>${exportPath}</strong></p>
-        </div>
-    `;
+        if (hours > 0) {
+            durationStr = `${hours}hr ${minutes}m ${seconds}sec`;
+        } else if (minutes > 0) {
+            durationStr = `${minutes}m ${seconds}sec`;
+        } else {
+            durationStr = `${seconds}sec`;
+        }
+    }
+    
+    // Update location and time
+    const locationElement = document.getElementById('completion-location');
+    const timeElement = document.getElementById('completion-time');
+    
+    if (locationElement) {
+        locationElement.textContent = exportPath;
+    }
+    
+    if (timeElement) {
+        timeElement.textContent = durationStr;
+    }
+    
+    // Apply error styling if there are errors
+    const successMessageBox = document.querySelector('.success-message-box');
+    const successText = document.querySelector('.success-text');
+    
+    if (hasErrors) {
+        successMessageBox.classList.add('has-errors');
+        if (successText) {
+            successText.textContent = 'Processing Complete with Errors';
+        }
+    } else {
+        successMessageBox.classList.remove('has-errors');
+        if (successText) {
+            successText.textContent = 'Your Files Are Ready';
+        }
+    }
+    
+    // Update statistics with proper formatting
+    const filesProcessedElement = document.getElementById('files-processed');
+    const filesOrganizedElement = document.getElementById('files-organized');
+    const dataProcessedElement = document.getElementById('data-processed');
+    
+    if (filesProcessedElement) {
+        const totalFiles = stats.total_files || 0;
+        // Format with commas (e.g., 26,589)
+        filesProcessedElement.textContent = totalFiles.toLocaleString('en-US');
+    }
+    
+    if (filesOrganizedElement) {
+        const copiedFiles = stats.copied_files || 0;
+        // Format with commas (e.g., 10,420)
+        filesOrganizedElement.textContent = copiedFiles.toLocaleString('en-US');
+    }
+    
+    if (dataProcessedElement) {
+        // Calculate data processed (assuming we have a size stat)
+        const totalSize = stats.total_size || stats.total_bytes || 0;
+        let sizeStr = '0 B';
+        
+        if (totalSize > 0) {
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let unitIndex = 0;
+            let size = totalSize;
+            
+            while (size >= 1024 && unitIndex < units.length - 1) {
+                size /= 1024;
+                unitIndex++;
+            }
+            
+            // Format like "19.75 GB" with proper spacing
+            if (unitIndex >= 3) { // GB or larger
+                sizeStr = `${size.toFixed(2)} ${units[unitIndex]}`;
+            } else {
+                sizeStr = `${Math.round(size)} ${units[unitIndex]}`;
+            }
+        }
+        
+        dataProcessedElement.textContent = sizeStr;
+    }
 }
 
 // Show logs

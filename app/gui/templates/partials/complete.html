@@ -1,24 +1,62 @@
 <div class="interface" id="completion-interface" style="display: none;">
-    <div class="completion-panel">
-        <div class="panel-header">
-            <h2>✅ Processing Complete</h2>
+    <div class="completion-container">
+        <!-- Success Header -->
+        <div class="completion-header">
+            <h1 class="completion-title">
+                <span class="success-icon">✅</span>
+                Processing Complete
+            </h1>
         </div>
         
-        <div class="completion-summary" id="completion-summary">
-            <!-- Results will be populated here -->
+        <!-- Success Message Box -->
+        <div class="success-message-box">
+            <div class="success-header-line">
+                <span class="folder-icon">📁</span>
+                <span class="success-text">Your Files Are Ready</span>
+            </div>
+            
+            <div class="success-details">
+                <div class="detail-row">
+                    <span class="detail-label">Location:</span>
+                    <span class="detail-value" id="completion-location">/Volumes/Creator Pro/gDrive-test-output</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Total Time To Process:</span>
+                    <span class="detail-value" id="completion-time">1hr 34m 33sec</span>
+                </div>
+            </div>
+            
+            <div class="success-footer">
+                <span class="footer-icon">💡</span>
+                <span>Your Google Drive structure has been recreated in the Drive folder location above!</span>
+            </div>
         </div>
         
-        <div class="action-buttons">
-            <button type="button" class="btn-primary" onclick="openOutputFolder()">
-                Open Output Folder
-            </button>
-            <button type="button" class="btn" onclick="cleanupTempFiles()">
-                Clean Temp Files
-            </button>
-            <button type="button" class="btn" onclick="downloadLogs()">
+        <!-- Statistics Cards -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-number" id="files-processed">26,589</div>
+                <div class="stat-label">Files Processed</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-number" id="files-organized">10,420</div>
+                <div class="stat-label">Files Organized</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-number" id="data-processed">19.75 GB</div>
+                <div class="stat-label">Data Processed</div>
+            </div>
+        </div>
+        
+        <!-- Action Buttons -->
+        <div class="completion-actions">
+            <button type="button" class="btn-outline" onclick="downloadLogs()">
                 Download Logs
             </button>
-            <button type="button" class="btn" onclick="startOver()">
+            <button type="button" class="btn-primary-action" onclick="startOver()">
                 Process More Files
             </button>
         </div>
