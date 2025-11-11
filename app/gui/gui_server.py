@@ -8,7 +8,7 @@ import webbrowser
 import threading
 import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -37,62 +37,42 @@ if static_dir.exists():
 if template_dir.exists():
     templates = Jinja2Templates(directory=template_dir)
 
-# Include routers
-app.include_router(paths_router, prefix="/api")
-app.include_router(progress_router, prefix="/api")
-app.include_router(processing_router, prefix="/api")
-app.include_router(logs_router, prefix="/api")
-app.include_router(system_router, prefix="/api")
+# Include routers (no prefix - templates expect routes at root level)
+app.include_router(paths_router)
+app.include_router(progress_router)
+app.include_router(processing_router)
+app.include_router(logs_router)
+app.include_router(system_router)
 
 # Root route - serve the main page
 @app.get("/")
-async def root():
+async def root(request: Request):
     """Serve the main GUI page"""
-    from fastapi import Request
     from fastapi.responses import HTMLResponse
-    
-    # Create a mock request for template rendering
-    class MockRequest:
-        def __init__(self):
-            self.url = "http://localhost:8000"
-    
-    request = MockRequest()
-    
-    # Simple HTML if no template exists
-    html_content = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Google Drive Takeout Rebuilder</title>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-            body { font-family: Arial, sans-serif; margin: 40px; }
-            .container { max-width: 800px; margin: 0 auto; }
-            .header { text-align: center; margin-bottom: 30px; }
-            .status { padding: 20px; border: 1px solid #ddd; margin: 20px 0; }
-            button { background: #007bff; color: white; border: none; padding: 10px 20px; cursor: pointer; }
-            button:hover { background: #0056b3; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>🗂️ Google Drive Takeout Rebuilder</h1>
-                <p>Reconstruct your Google Drive folder structure from takeout files</p>
-            </div>
-            <div class="status">
-                <h2>GUI is Running!</h2>
-                <p>The web server is successfully running. The full GUI interface would normally be served from templates.</p>
-                <p>For now, you can use the CLI interface:</p>
-                <pre>takeout-rebuilder --help</pre>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    
-    return HTMLResponse(content=html_content)
+
+    try:
+        # Try to serve the template if it exists
+        return templates.TemplateResponse("index.html", {"request": request})
+    except Exception as e:
+        # Fallback to simple HTML if template doesn't exist
+        print(f"Warning: Could not load template: {e}")
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Google Drive Takeout Rebuilder</title>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+        </head>
+        <body>
+            <h1>Google Drive Takeout Rebuilder</h1>
+            <p>Template error: {e}</p>
+            <p>Template directory: {template_dir}</p>
+            <p>Static directory: {static_dir}</p>
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=html_content)
 
 
 def open_browser(port: int = 8000):

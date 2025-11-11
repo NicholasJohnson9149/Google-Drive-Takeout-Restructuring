@@ -214,3 +214,4 @@ gui_state.pkl
 takeout_logs/
 gdrive_env/
 
+gui_server.py.bak

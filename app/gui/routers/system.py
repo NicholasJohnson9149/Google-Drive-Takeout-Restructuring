@@ -7,12 +7,20 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-# Import from the main gui_server module
-import sys
-sys.path.append(str(Path(__file__).parent.parent.parent.parent))
-import gui_server as root_app
+# Import gui_state for health check
+from app.gui.state import gui_state
 
 router = APIRouter()
+
+
+@router.get("/health")
+async def health():
+    """Health check endpoint"""
+    return JSONResponse({
+        "status": "ok",
+        "message": "GUI server is running",
+        "active_operations": len(gui_state.active_operations)
+    })
 
 
 @router.post("/open-folder")

@@ -11,10 +11,8 @@ from typing import List
 from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse
 
-# Import from the main gui_server module
-import sys
-sys.path.append(str(Path(__file__).parent.parent.parent.parent))
-import gui_server as root_app
+# Import from centralized state (no more circular dependency!)
+from app.gui.state import gui_state
 from app.core.cli_executor import CLIExecutor
 
 router = APIRouter()
@@ -22,7 +20,7 @@ router = APIRouter()
 
 @router.post("/start-processing")
 async def start_processing(request: Request):
-    gui_state = root_app.gui_state
+    # gui_state is now imported directly at module level
     try:
         data = await request.json()
         takeout_path = data['takeout_path']
